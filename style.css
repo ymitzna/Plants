@@ -205,3 +205,13 @@ h1 {
     background-color: #ffeaea;
     color: var(--danger-color);
 }
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-color: #000000;
+        --card-bg: #1c1c1e;
+        --text-primary: #ffffff;
+        --text-secondary: #98989d;
+        --divider-color: #38383a;
+    }
+}
