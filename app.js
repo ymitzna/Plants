@@ -66,6 +66,26 @@ function renderPlants() {
     plantListEl.innerHTML = '';
     const now = Date.now();
 
+    if (plants.length === 0) {
+        plantListEl.innerHTML = `
+            <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+                <div style="font-size: 54px; margin-bottom: 16px;">🪴</div>
+                <h3 style="color: var(--text-primary); margin-bottom: 8px;">No Plants Yet</h3>
+                <p>Tap the + button to add your first plant.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Sort plants: Urgency (lowest time remaining) floats to the top
+    plants.sort((a, b) => {
+        const nextA = a.lastWatered + (a.interval * MS_PER_DAY);
+        const nextB = b.lastWatered + (b.interval * MS_PER_DAY);
+        return nextA - nextB;
+    });
+
+    // ... continue with the existing plants.forEach loop
+
     plants.forEach((plant, index) => {
         const nextWaterDate = plant.lastWatered + (plant.interval * MS_PER_DAY);
         const daysLeft = Math.ceil((nextWaterDate - now) / MS_PER_DAY);
