@@ -9,12 +9,18 @@ if ('serviceWorker' in navigator) {
 let plants = JSON.parse(localStorage.getItem('plants')) || [];
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-// DOM Elements
+// DOM Elements - Add
 const plantListEl = document.getElementById('plant-list');
 const addModal = document.getElementById('add-modal');
 const addBtn = document.getElementById('add-btn');
-const cancelBtn = document.getElementById('cancel-btn');
+const cancelAddBtn = document.getElementById('cancel-add-btn');
 const addForm = document.getElementById('add-form');
+
+// DOM Elements - Edit/Delete
+const editModal = document.getElementById('edit-modal');
+const cancelEditBtn = document.getElementById('cancel-edit-btn');
+const editForm = document.getElementById('edit-form');
+const deleteBtn = document.getElementById('delete-btn');
 
 // Request Notification permission required for App Badging on iOS 16.4+
 async function ensurePermissions() {
@@ -29,7 +35,7 @@ async function ensurePermissions() {
 
 // Update iOS App Badge
 async function updateAppBadge() {
-    if (!('setAppBadge' in navigator)) return;
+    if (!('setAppBadge' in navigator)) return; //
 
     let overdueCount = 0;
     const now = Date.now();
@@ -42,9 +48,9 @@ async function updateAppBadge() {
 
     try {
         if (overdueCount > 0) {
-            await navigator.setAppBadge(overdueCount);
+            await navigator.setAppBadge(overdueCount); //
         } else {
-            await navigator.clearAppBadge();
+            await navigator.clearAppBadge(); //
         }
     } catch (e) {
         console.error("Failed to update badge", e);
@@ -82,31 +88,37 @@ function renderPlants() {
         card.innerHTML = `
             <div class="plant-info">
                 <h3>${plant.name}</h3>
-                <p class="${isOverdue ? 'overdue' : ''}">${statusText}</p>
+                ${plant.species ? `<div class="plant-species">${plant.species}</div>` : ''}
+                <p class="plant-status ${isOverdue ? 'overdue' : ''}">${statusText}</p>
             </div>
-            <button class="water-btn" data-index="${index}">Watered</button>
+            <div class="card-actions">
+                <button class="water-btn" data-index="${index}">Watered</button>
+                <button class="edit-btn" data-index="${index}">Edit</button>
+            </div>
         `;
         plantListEl.appendChild(card);
     });
 }
 
-// Event Listeners
+// Event Listeners - Add
 addBtn.addEventListener('click', () => addModal.classList.remove('hidden'));
 
-cancelBtn.addEventListener('click', () => {
+cancelAddBtn.addEventListener('click', () => {
     addModal.classList.add('hidden');
     addForm.reset();
 });
 
 addForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    await ensurePermissions(); // Trigger permission prompt on user interaction
+    await ensurePermissions(); 
 
     const name = document.getElementById('plant-name').value;
+    const species = document.getElementById('plant-species').value;
     const interval = parseInt(document.getElementById('water-interval').value, 10);
     
     plants.push({
         name,
+        species,
         interval,
         lastWatered: Date.now()
     });
@@ -117,13 +129,54 @@ addForm.addEventListener('submit', async (e) => {
     addForm.reset();
 });
 
+// Event Listeners - Edit & Delete
 plantListEl.addEventListener('click', async (e) => {
+    const index = e.target.getAttribute('data-index');
+    
+    // Water Action
     if (e.target.classList.contains('water-btn')) {
-        await ensurePermissions(); // Ensure permissions are set
-        const index = e.target.getAttribute('data-index');
+        await ensurePermissions(); 
         plants[index].lastWatered = Date.now();
         savePlants();
         renderPlants();
+    }
+    
+    // Open Edit Modal Action
+    if (e.target.classList.contains('edit-btn')) {
+        const plant = plants[index];
+        document.getElementById('edit-plant-index').value = index;
+        document.getElementById('edit-plant-name').value = plant.name;
+        document.getElementById('edit-plant-species').value = plant.species || '';
+        document.getElementById('edit-water-interval').value = plant.interval;
+        editModal.classList.remove('hidden');
+    }
+});
+
+cancelEditBtn.addEventListener('click', () => {
+    editModal.classList.add('hidden');
+    editForm.reset();
+});
+
+editForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    
+    const index = document.getElementById('edit-plant-index').value;
+    plants[index].name = document.getElementById('edit-plant-name').value;
+    plants[index].species = document.getElementById('edit-plant-species').value;
+    plants[index].interval = parseInt(document.getElementById('edit-water-interval').value, 10);
+    
+    savePlants();
+    renderPlants();
+    editModal.classList.add('hidden');
+});
+
+deleteBtn.addEventListener('click', () => {
+    const index = document.getElementById('edit-plant-index').value;
+    if(confirm("Are you sure you want to delete this plant?")) {
+        plants.splice(index, 1);
+        savePlants();
+        renderPlants();
+        editModal.classList.add('hidden');
     }
 });
 
