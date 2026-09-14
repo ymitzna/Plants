@@ -3,10 +3,11 @@
     --card-bg: #ffffff;
     --text-primary: #000000;
     --text-secondary: #8e8e93;
-    --accent-color: #34c759; /* iOS green */
+    --accent-color: #34c759;
     --accent-color-hover: #2db34f;
-    --danger-color: #ff3b30; /* iOS red */
+    --danger-color: #ff3b30; 
     --divider-color: #c6c6c8;
+    --edit-color: #007aff; /* iOS Blue */
 }
 
 * {
@@ -67,20 +68,38 @@ h1 {
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
+.plant-info {
+    flex-grow: 1;
+}
+
 .plant-info h3 {
     font-size: 17px;
     font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
 }
 
-.plant-info p {
-    font-size: 15px;
+.plant-species {
+    font-size: 13px;
     color: var(--text-secondary);
+    font-style: italic;
+    margin-bottom: 6px;
+}
+
+.plant-status {
+    font-size: 15px;
+    color: var(--text-primary);
 }
 
 .overdue {
     color: var(--danger-color) !important;
     font-weight: 500;
+}
+
+.card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
 }
 
 .water-btn {
@@ -96,6 +115,15 @@ h1 {
 
 .water-btn:active {
     background-color: var(--accent-color-hover);
+}
+
+.edit-btn {
+    background: none;
+    border: none;
+    color: var(--edit-color);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px;
 }
 
 /* Modal Styling */
@@ -150,7 +178,7 @@ h1 {
 .modal-actions {
     display: flex;
     gap: 10px;
-    margin-top: 20px;
+    margin-top: 15px;
 }
 
 .modal-actions button {
@@ -171,4 +199,9 @@ h1 {
 .btn-primary {
     background-color: var(--accent-color);
     color: white;
+}
+
+.btn-danger {
+    background-color: #ffeaea;
+    color: var(--danger-color);
 }
