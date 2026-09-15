@@ -1,4 +1,4 @@
-const CACHE_NAME = 'plant-tracker-v1';
+const CACHE_NAME = 'plant-tracker-v2';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -31,14 +31,24 @@ self.addEventListener('activate', event => {
     self.clients.claim();
 });
 
+// Stale-while-revalidate strategy
 self.addEventListener('fetch', event => {
+    if (event.request.method !== 'GET') return;
+    
     event.respondWith(
-        caches.match(event.request).then(response => {
-            // Cache hit - return response
-            if (response) {
-                return response;
-            }
-            return fetch(event.request);
+        caches.match(event.request).then(cachedResponse => {
+            const fetchPromise = fetch(event.request).then(networkResponse => {
+                if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+                    caches.open(CACHE_NAME).then(cache => {
+                        cache.put(event.request, networkResponse.clone());
+                    });
+                }
+                return networkResponse;
+            }).catch(() => {
+                // Ignore fetch errors if offline
+            });
+            
+            return cachedResponse || fetchPromise;
         })
     );
 });
