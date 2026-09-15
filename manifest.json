@@ -18,5 +18,14 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add Plant",
+      "short_name": "Add",
+      "description": "Add a new plant to track",
+      "url": "/?action=add",
+      "icons": [{"src": "icon-192.png", "sizes": "192x192"}]
+    }
   ]
 }
