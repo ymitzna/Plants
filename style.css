@@ -44,6 +44,12 @@ h1 {
     color: var(--text-primary);
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
 .icon-btn {
     background: none;
     border: none;
@@ -52,6 +58,10 @@ h1 {
     font-weight: 300;
     cursor: pointer;
     transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.icon-btn-small {
+    font-size: 24px;
 }
 
 .icon-btn:hover {
@@ -131,25 +141,13 @@ h1 {
 
 /* Animations */
 @keyframes slideUpFade {
-    0% {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    100% {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    0% { opacity: 0; transform: translateY(20px); }
+    100% { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes popIn {
-    0% {
-        opacity: 0;
-        transform: scale(0.9) translateY(20px);
-    }
-    100% {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
+    0% { opacity: 0; transform: scale(0.9) translateY(20px); }
+    100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .plant-list {
@@ -390,6 +388,28 @@ h1 {
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
+/* History List UI */
+.history-container {
+    max-height: 120px;
+    overflow-y: auto;
+    background-color: var(--bg-color);
+    border-radius: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--divider-color);
+}
+
+.history-item {
+    font-size: 14px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--divider-color);
+    display: flex;
+    justify-content: space-between;
+}
+
+.history-item:last-child {
+    border-bottom: none;
+}
+
 .modal-actions {
     display: flex;
     gap: 12px;
@@ -442,7 +462,7 @@ h1 {
     transform: translateX(-50%) translateY(20px) scale(0.9);
     background-color: #1e293b;
     color: white;
-    padding: 14px 28px;
+    padding: 14px 24px;
     border-radius: 30px;
     font-size: 15px;
     font-weight: 600;
@@ -451,14 +471,35 @@ h1 {
     transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     z-index: 200;
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    white-space: nowrap;
 }
 
 .toast.show {
     opacity: 1;
+    pointer-events: auto;
     transform: translateX(-50%) translateY(0) scale(1);
 }
 
-/* Dark Mode - Mint adjustments */
+.toast-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.4);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.toast-btn:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+/* Dark Mode */
 @media (prefers-color-scheme: dark) {
     :root {
         --bg-color: #0f172a;
@@ -478,8 +519,18 @@ h1 {
         background-color: #f8fafc;
         color: #0f172a;
     }
+
+    .toast-btn {
+        color: #0f172a;
+        border-color: rgba(15, 23, 42, 0.4);
+    }
+
+    .toast-btn:hover {
+        background: rgba(15, 23, 42, 0.1);
+    }
     
     .btn-danger {
-        background-color: rgba(239, 68, 68, 0.15);
+        background-color: rgba(239, 68, 68, 0.2);
+        color: #fca5a5; /* Improved contrast for dark mode */
     }
 }
