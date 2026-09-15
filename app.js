@@ -75,6 +75,7 @@ function deletePlantFromDB(id) {
 const plantListEl = document.getElementById('plant-list');
 const addModal = document.getElementById('add-modal');
 const addBtn = document.getElementById('add-btn');
+const exportBtn = document.getElementById('export-btn');
 const cancelAddBtn = document.getElementById('cancel-add-btn');
 const addForm = document.getElementById('add-form');
 
@@ -82,7 +83,11 @@ const editModal = document.getElementById('edit-modal');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const editForm = document.getElementById('edit-form');
 const deleteBtn = document.getElementById('delete-btn');
+const historyContainer = document.getElementById('history-container');
+
 const toastEl = document.getElementById('toast');
+const toastMessageEl = document.getElementById('toast-message');
+const toastUndoBtn = document.getElementById('toast-undo');
 
 const searchInput = document.getElementById('search-input');
 const filterSelect = document.getElementById('filter-select');
@@ -90,10 +95,11 @@ const sortSelect = document.getElementById('sort-select');
 const waterAllBtn = document.getElementById('water-all-btn');
 
 let toastTimeout;
+let activeUndoAction = null;
 
 // Utilities
 async function ensurePermissions() {
-    if ('Notification' in window && Notification.permission !== 'granted') {
+    if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
         try {
             await Notification.requestPermission();
         } catch (e) {
@@ -102,28 +108,91 @@ async function ensurePermissions() {
     }
 }
 
-async function updateAppBadge(plants) {
-    if (!('setAppBadge' in navigator)) return; 
+async function updateAppBadgeAndNotify(plants) {
     let overdueCount = 0;
     const now = Date.now();
+    
     plants.forEach(plant => {
         const { daysLeft } = calculatePlantStatus(plant, now);
         if (daysLeft <= 0) overdueCount++;
     });
-    try {
-        if (overdueCount > 0) await navigator.setAppBadge(overdueCount);
-        else await navigator.clearAppBadge();
-    } catch (e) {
-        console.error("Failed to update badge", e);
+
+    // App Badge
+    if ('setAppBadge' in navigator) {
+        try {
+            if (overdueCount > 0) await navigator.setAppBadge(overdueCount);
+            else await navigator.clearAppBadge();
+        } catch (e) {
+            console.error("Failed to update badge", e);
+        }
+    }
+
+    // Actual Notifications (Once per day limit to avoid spam)
+    if ('Notification' in window && Notification.permission === 'granted' && overdueCount > 0) {
+        const lastNotified = localStorage.getItem('lastNotifiedDate');
+        const today = new Date().toDateString();
+        
+        if (lastNotified !== today) {
+            navigator.serviceWorker.ready.then(reg => {
+                reg.showNotification('Plants Need Water!', {
+                    body: `You have ${overdueCount} plant(s) ready to be watered today.`,
+                    icon: 'icon-192.png',
+                    badge: 'icon-192.png'
+                });
+            });
+            localStorage.setItem('lastNotifiedDate', today);
+        }
     }
 }
 
-function showToast(message) {
+function showToast(message, undoCallback = null) {
     clearTimeout(toastTimeout);
-    toastEl.textContent = message;
+    toastMessageEl.textContent = message;
+    
+    if (undoCallback) {
+        toastUndoBtn.style.display = 'block';
+        activeUndoAction = undoCallback;
+    } else {
+        toastUndoBtn.style.display = 'none';
+        activeUndoAction = null;
+    }
+
     toastEl.classList.add('show');
-    toastTimeout = setTimeout(() => toastEl.classList.remove('show'), 2500);
+    toastTimeout = setTimeout(() => {
+        toastEl.classList.remove('show');
+        activeUndoAction = null;
+    }, 4000); // Extended time slightly for undo actions
 }
+
+toastUndoBtn.addEventListener('click', () => {
+    if (activeUndoAction) {
+        activeUndoAction();
+        toastEl.classList.remove('show');
+        activeUndoAction = null;
+    }
+});
+
+// JSON Export Feature
+exportBtn.addEventListener('click', async () => {
+    try {
+        const plants = await getAllPlants();
+        const dataStr = JSON.stringify(plants, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `plant-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast('Backup downloaded securely.');
+    } catch (e) {
+        showToast('Failed to export data.');
+    }
+});
 
 // Image Compression using Canvas
 function compressImage(file, maxWidth = 800, quality = 0.7) {
@@ -146,7 +215,7 @@ function compressImage(file, maxWidth = 800, quality = 0.7) {
                 
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL('image/jpeg', quality)); // Convert to compressed JPEG
+                resolve(canvas.toDataURL('image/jpeg', quality)); 
             };
             img.onerror = reject;
             img.src = event.target.result;
@@ -165,31 +234,47 @@ function calculatePlantStatus(plant, now) {
     return { lastWatered, nextWaterDate, daysLeft, totalIntervalDays };
 }
 
+function renderHistoryList(historyArray) {
+    historyContainer.innerHTML = '';
+    if (!historyArray || historyArray.length === 0) {
+        historyContainer.innerHTML = '<div class="history-item">No watering history yet.</div>';
+        return;
+    }
+    
+    // Sort newest first
+    const sortedHistory = [...historyArray].sort((a, b) => b - a);
+    sortedHistory.forEach((timestamp, index) => {
+        const date = new Date(timestamp);
+        const formattedDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const div = document.createElement('div');
+        div.className = 'history-item';
+        div.innerHTML = `<span>💦 Watered</span> <span>${formattedDate}</span>`;
+        historyContainer.appendChild(div);
+    });
+}
+
 // Core Rendering
 async function renderPlants() {
     plantListEl.innerHTML = '';
     const now = Date.now();
     let plants = await getAllPlants();
-    updateAppBadge(plants);
+    
+    updateAppBadgeAndNotify(plants);
 
-    // Apply Search
     const searchTerm = searchInput.value.toLowerCase();
     if (searchTerm) {
         plants = plants.filter(p => p.name.toLowerCase().includes(searchTerm) || (p.species && p.species.toLowerCase().includes(searchTerm)));
     }
 
-    // Apply Filter
     const filterTerm = filterSelect.value;
     let dueCount = 0;
     
-    // Add computed status to plants for sorting/filtering
     plants = plants.map(plant => ({ ...plant, computedStatus: calculatePlantStatus(plant, now) }));
     
     if (filterTerm === 'due') {
         plants = plants.filter(p => p.computedStatus.daysLeft <= 0);
     }
     
-    // Calculate total due globally for the Bulk Action button
     const allPlants = await getAllPlants();
     allPlants.forEach(p => {
         if (calculatePlantStatus(p, now).daysLeft <= 0) dueCount++;
@@ -197,7 +282,6 @@ async function renderPlants() {
 
     waterAllBtn.style.display = dueCount > 0 && plants.length > 0 ? 'block' : 'none';
 
-    // Apply Sort
     const sortTerm = sortSelect.value;
     if (sortTerm === 'urgency') {
         plants.sort((a, b) => a.computedStatus.nextWaterDate - b.computedStatus.nextWaterDate);
@@ -276,6 +360,9 @@ waterAllBtn.addEventListener('click', async () => {
     const now = Date.now();
     const plants = await getAllPlants();
     let wateredCount = 0;
+    
+    // Deep clone state for undo
+    const oldPlantsState = JSON.parse(JSON.stringify(plants));
 
     for (let plant of plants) {
         const { daysLeft } = calculatePlantStatus(plant, now);
@@ -290,8 +377,22 @@ waterAllBtn.addEventListener('click', async () => {
     }
 
     if (wateredCount > 0) {
-        showToast(`Watered ${wateredCount} plant(s)!`);
         renderPlants();
+        showToast(`Watered ${wateredCount} plant(s)!`, async () => {
+            for (let oldPlant of oldPlantsState) {
+                await savePlant(oldPlant);
+            }
+            renderPlants();
+            showToast('Bulk watering undone.');
+        });
+    }
+});
+
+// PWA Shortcut handling on load
+window.addEventListener('load', () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('action') === 'add') {
+        addModal.classList.add('show');
     }
 });
 
@@ -342,6 +443,8 @@ plantListEl.addEventListener('click', async (e) => {
     if (e.target.classList.contains('water-btn')) {
         await ensurePermissions(); 
         const now = Date.now();
+        const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
+
         plant.lastWatered = now;
         if (!plant.history) plant.history = [];
         plant.history.push(now);
@@ -349,18 +452,30 @@ plantListEl.addEventListener('click', async (e) => {
         
         await savePlant(plant);
         renderPlants();
-        showToast(`${plant.name} watered!`);
+        
+        showToast(`${plant.name} watered!`, async () => {
+            await savePlant(oldState);
+            renderPlants();
+            showToast('Watering undone.');
+        });
     }
 
     // Snooze Action
     if (e.target.classList.contains('snooze-btn')) {
+        const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
+        
         const lastWatered = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
         const currentTarget = Math.max(lastWatered + (plant.interval * MS_PER_DAY), plant.snoozedUntil || 0, Date.now());
         plant.snoozedUntil = currentTarget + MS_PER_DAY;
         
         await savePlant(plant);
         renderPlants();
-        showToast(`${plant.name} snoozed for 1 day.`);
+        
+        showToast(`${plant.name} snoozed for 1 day.`, async () => {
+            await savePlant(oldState);
+            renderPlants();
+            showToast('Snooze undone.');
+        });
     }
     
     // Open Edit Modal
@@ -378,6 +493,8 @@ plantListEl.addEventListener('click', async (e) => {
             preview.style.display = 'none';
         }
 
+        renderHistoryList(plant.history || [plant.lastWatered]);
+
         editModal.classList.add('show');
     }
 });
@@ -392,6 +509,7 @@ editForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = Number(document.getElementById('edit-plant-id').value);
     const plant = await getPlant(id);
+    const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
     
     plant.name = document.getElementById('edit-plant-name').value;
     plant.species = document.getElementById('edit-plant-species').value;
@@ -405,7 +523,12 @@ editForm.addEventListener('submit', async (e) => {
     await savePlant(plant);
     renderPlants();
     editModal.classList.remove('show');
-    showToast('Plant updated successfully.');
+    
+    showToast('Plant updated successfully.', async () => {
+        await savePlant(oldState);
+        renderPlants();
+        showToast('Edits undone.');
+    });
 });
 
 deleteBtn.addEventListener('click', async () => {
@@ -416,7 +539,12 @@ deleteBtn.addEventListener('click', async () => {
         await deletePlantFromDB(id);
         renderPlants();
         editModal.classList.remove('show');
-        showToast(`${plant.name} deleted.`);
+        
+        showToast(`${plant.name} deleted.`, async () => {
+            await savePlant(plant); // Re-insert the full plant object
+            renderPlants();
+            showToast('Deletion undone.');
+        });
     }
 });
 
