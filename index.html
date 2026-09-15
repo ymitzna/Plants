@@ -19,7 +19,10 @@
 <body>
     <header>
         <h1>My Plants</h1>
-        <button id="add-btn" class="icon-btn">+</button>
+        <div class="header-actions">
+            <button id="export-btn" class="icon-btn icon-btn-small" aria-label="Export Backup" title="Export Backup">💾</button>
+            <button id="add-btn" class="icon-btn" aria-label="Add new plant">+</button>
+        </div>
     </header>
 
     <div class="controls-section">
@@ -42,7 +45,10 @@
     </main>
 
     <!-- Toast Notification -->
-    <div id="toast" class="toast"></div>
+    <div id="toast" class="toast">
+        <span id="toast-message"></span>
+        <button id="toast-undo" class="toast-btn" style="display: none;">Undo</button>
+    </div>
 
     <!-- Add Plant Modal -->
     <div id="add-modal" class="modal">
@@ -95,6 +101,12 @@
                 <div class="form-group">
                     <label for="edit-water-interval">Water every (days)</label>
                     <input type="number" id="edit-water-interval" required min="1">
+                </div>
+                <div class="form-group">
+                    <label>Watering History</label>
+                    <div id="history-container" class="history-container">
+                        <!-- History injected here -->
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" id="delete-btn" class="btn-danger">Delete</button>
