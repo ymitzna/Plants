@@ -19,15 +19,37 @@
         <button id="add-btn" class="icon-btn">+</button>
     </header>
 
+    <div class="controls-section">
+        <input type="text" id="search-input" placeholder="Search by name or species...">
+        <div class="filters-row">
+            <select id="filter-select">
+                <option value="all">All Plants</option>
+                <option value="due">Due / Overdue</option>
+            </select>
+            <select id="sort-select">
+                <option value="urgency">Urgency</option>
+                <option value="name">Name (A-Z)</option>
+            </select>
+        </div>
+        <button id="water-all-btn" class="btn-primary bulk-water-btn" style="display: none;">Water All Due Today</button>
+    </div>
+
     <main id="plant-list" class="plant-list">
         <!-- Plants will be injected here via JS -->
     </main>
 
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
     <!-- Add Plant Modal -->
-    <div id="add-modal" class="modal hidden">
+    <div id="add-modal" class="modal">
         <div class="modal-content">
             <h2>Add New Plant</h2>
             <form id="add-form">
+                <div class="form-group">
+                    <label for="plant-photo">Photo</label>
+                    <input type="file" id="plant-photo" accept="image/*">
+                </div>
                 <div class="form-group">
                     <label for="plant-name">Plant Nickname</label>
                     <input type="text" id="plant-name" required placeholder="e.g. Barnaby">
@@ -49,11 +71,16 @@
     </div>
 
     <!-- Edit Plant Modal -->
-    <div id="edit-modal" class="modal hidden">
+    <div id="edit-modal" class="modal">
         <div class="modal-content">
             <h2>Edit Plant</h2>
             <form id="edit-form">
-                <input type="hidden" id="edit-plant-index">
+                <input type="hidden" id="edit-plant-id">
+                <div class="form-group photo-preview-group">
+                    <img id="edit-photo-preview" src="" alt="Current plant photo" style="display: none;">
+                    <label for="edit-plant-photo">Update Photo</label>
+                    <input type="file" id="edit-plant-photo" accept="image/*">
+                </div>
                 <div class="form-group">
                     <label for="edit-plant-name">Plant Nickname</label>
                     <input type="text" id="edit-plant-name" required>
