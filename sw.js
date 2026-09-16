@@ -8,7 +8,7 @@ const ASSETS_TO_CACHE = [
 ];
 
 self.addEventListener('install', event => {
-    event.waitUntil(
+    event.waitUntil( 
         caches.open(CACHE_NAME).then(cache => {
             return cache.addAll(ASSETS_TO_CACHE);
         })
