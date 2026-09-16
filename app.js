@@ -113,62 +113,10 @@ async function updateAppBadgeAndNotify(plants) {
     const now = Date.now();
     
     plants.forEach(plant => {
-        const { daysLeft, totalIntervalDays, lastWatered } = plant.computedStatus;
-        
-        let statusText = '';
-        let isOverdue = false;
-        let progressColor = 'var(--accent-color)'; // Default Green
-
-        // Determine status text and symbol color
-        if (daysLeft < 0) {
-            statusText = `Overdue by ${Math.abs(daysLeft)} day(s)`;
-            isOverdue = true;
-            progressColor = 'var(--danger-color)'; // Red
-        } else if (daysLeft === 0) {
-            statusText = 'Water today';
-            isOverdue = true;
-            progressColor = 'var(--warning-color)'; // Yellow
-        } else {
-            statusText = `Water in ${daysLeft} day(s)`;
-            // Optionally, you can fade the green based on time left, or leave it solid green
-            progressColor = 'var(--accent-color)';
+        const { daysLeft } = plant.computedStatus || calculatePlantStatus(plant, now);
+        if (daysLeft <= 0) {
+            overdueCount++;
         }
-
-        // New Feature: Format the last watered date
-        const lastWateredFormatted = new Date(lastWatered).toLocaleDateString(undefined, { 
-            month: 'short', 
-            day: 'numeric' 
-        });
-
-        const photoHtml = plant.photo 
-            ? `<img src="${plant.photo}" alt="${plant.name}">` 
-            : `🌱`;
-
-        const card = document.createElement('div');
-        card.className = 'plant-card';
-        card.innerHTML = `
-            <div class="plant-header">
-                <div class="plant-photo-container">${photoHtml}</div>
-                <div class="plant-info">
-                    <h3>${plant.name}</h3>
-                    ${plant.species ? `<div class="plant-species">${plant.species}</div>` : ''}
-                    
-                    <div class="status-row">
-                        <span class="status-symbol" style="color: ${progressColor};">💧</span>
-                        <p class="plant-status ${isOverdue ? 'overdue' : ''}">${statusText}</p>
-                    </div>
-                    
-                    <div class="last-watered-text">Last watered: ${lastWateredFormatted}</div>
-                </div>
-            </div>
-            
-            <div class="card-actions">
-                <button class="snooze-btn" data-id="${plant.id}">+1 Day</button>
-                <button class="water-btn" data-id="${plant.id}">Watered</button>
-                <button class="edit-btn" data-id="${plant.id}">Edit</button>
-            </div>
-        `;
-        plantListEl.appendChild(card);
     });
 
     // App Badge
@@ -215,7 +163,7 @@ function showToast(message, undoCallback = null) {
     toastTimeout = setTimeout(() => {
         toastEl.classList.remove('show');
         activeUndoAction = null;
-    }, 4000); // Extended time slightly for undo actions
+    }, 4000);
 }
 
 toastUndoBtn.addEventListener('click', () => {
@@ -297,12 +245,12 @@ function renderHistoryList(historyArray) {
     
     // Sort newest first
     const sortedHistory = [...historyArray].sort((a, b) => b - a);
-    sortedHistory.forEach((timestamp, index) => {
+    sortedHistory.forEach((timestamp) => {
         const date = new Date(timestamp);
         const formattedDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
         const div = document.createElement('div');
         div.className = 'history-item';
-        div.innerHTML = `<span>💦 Watered</span> <span>${formattedDate}</span>`;
+        div.innerHTML = `<span>💧 Watered</span> <span>${formattedDate}</span>`;
         historyContainer.appendChild(div);
     });
 }
@@ -313,6 +261,9 @@ async function renderPlants() {
     const now = Date.now();
     let plants = await getAllPlants();
     
+    // Calculate status for all plants first
+    plants = plants.map(plant => ({ ...plant, computedStatus: calculatePlantStatus(plant, now) }));
+    
     updateAppBadgeAndNotify(plants);
 
     const searchTerm = searchInput.value.toLowerCase();
@@ -322,8 +273,6 @@ async function renderPlants() {
 
     const filterTerm = filterSelect.value;
     let dueCount = 0;
-    
-    plants = plants.map(plant => ({ ...plant, computedStatus: calculatePlantStatus(plant, now) }));
     
     if (filterTerm === 'due') {
         plants = plants.filter(p => p.computedStatus.daysLeft <= 0);
@@ -354,7 +303,7 @@ async function renderPlants() {
     }
 
     plants.forEach(plant => {
-        const { daysLeft, totalIntervalDays } = plant.computedStatus;
+        const { daysLeft, totalIntervalDays, lastWatered } = plant.computedStatus;
         
         let statusText = '';
         let isOverdue = false;
@@ -375,6 +324,11 @@ async function renderPlants() {
             progressPercent = Math.max(0, Math.min(100, (daysElapsed / totalIntervalDays) * 100));
         }
 
+        const lastWateredFormatted = new Date(lastWatered).toLocaleDateString(undefined, { 
+            month: 'short', 
+            day: 'numeric' 
+        });
+
         const photoHtml = plant.photo 
             ? `<img src="${plant.photo}" alt="${plant.name}">` 
             : `🪴`;
@@ -387,10 +341,20 @@ async function renderPlants() {
                 <div class="plant-info">
                     <h3>${plant.name}</h3>
                     ${plant.species ? `<div class="plant-species">${plant.species}</div>` : ''}
-                    <p class="plant-status ${isOverdue ? 'overdue' : ''}">${statusText}</p>
+                    
+                    <div class="status-row">
+                        <span class="status-symbol" style="color: ${progressColor};">💧</span>
+                        <p class="plant-status ${isOverdue ? 'overdue' : ''}">${statusText}</p>
+                    </div>
+                    
+                    <div class="last-watered-text">Last watered: ${lastWateredFormatted}</div>
                 </div>
             </div>
             
+            <div style="width: 100%; background: var(--divider-color); height: 6px; border-radius: 3px; margin-bottom: 16px; overflow: hidden;">
+                <div style="width: ${progressPercent}%; background: ${progressColor}; height: 100%; transition: width 0.3s ease;"></div>
+            </div>
+
             <div class="card-actions">
                 <button class="snooze-btn" data-id="${plant.id}">+1 Day</button>
                 <button class="water-btn" data-id="${plant.id}">Watered</button>
