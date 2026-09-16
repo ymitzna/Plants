@@ -390,9 +390,7 @@ async function renderPlants() {
                     <p class="plant-status ${isOverdue ? 'overdue' : ''}">${statusText}</p>
                 </div>
             </div>
-            <div class="progress-bar-bg">
-                <div class="progress-bar-fill" style="width: ${progressPercent}%; background-color: ${progressColor};"></div>
-            </div>
+            
             <div class="card-actions">
                 <button class="snooze-btn" data-id="${plant.id}">+1 Day</button>
                 <button class="water-btn" data-id="${plant.id}">Watered</button>
