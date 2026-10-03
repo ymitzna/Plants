@@ -52,3 +52,49 @@ self.addEventListener('fetch', event => {
         })
     );
 });
+
+self.addEventListener('push', event => {
+    let payload = { title: 'Plant Tracker', body: 'Time to check your plants!' };
+    
+    // Extract data from the server payload if available
+    if (event.data) {
+        try {
+            payload = event.data.json(); // If Supabase sends a JSON payload
+        } catch (e) {
+            payload.body = event.data.text(); // Fallback to plain text
+        }
+    }
+
+    const options = {
+        body: payload.body,
+        icon: './icon-192.png',
+        badge: './icon-192.png'
+    };
+
+    // CRITICAL FOR iOS: You must wrap showNotification in event.waitUntil()
+    event.waitUntil(
+        self.registration.showNotification(payload.title || 'Plant Tracker', options)
+    );
+});
+
+self.addEventListener('notificationclick', event => {
+    // Close the notification immediately when tapped
+    event.notification.close();
+
+    // This forces the PWA to open or come to the foreground
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+            for (let i = 0; i < clientList.length; i++) {
+                const client = clientList[i];
+                // If the app is already open in the background, focus it
+                if (client.url === '/' && 'focus' in client) {
+                    return client.focus();
+                }
+            }
+            // If the app is completely closed, open a new instance
+            if (clients.openWindow) {
+                return clients.openWindow('/');
+            }
+        })
+    );
+});
