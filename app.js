@@ -7,68 +7,45 @@ if ('serviceWorker' in navigator) {
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-// IndexedDB Setup
-const DB_NAME = 'PlantTrackerDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'plants';
-let db;
+// Supabase Setup
+const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function initDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onerror = (e) => reject('IndexedDB error: ' + e.target.error);
-        request.onsuccess = (e) => {
-            db = e.target.result;
-            resolve(db);
-        };
-        request.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-            }
-        };
-    });
+    return Promise.resolve(); // Kept so the initialization call at the bottom of the file doesn't break
 }
 
 // DB Operations
-function getAllPlants() {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readonly');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = store.getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
+async function getAllPlants() {
+    const { data, error } = await supabase.from('plants').select('*').order('id', { ascending: true });
+    if (error) throw error;
+    return data || [];
 }
 
-function getPlant(id) {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readonly');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = store.get(id);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
+async function getPlant(id) {
+    const { data, error } = await supabase.from('plants').select('*').eq('id', id).single();
+    if (error) throw error;
+    return data;
 }
 
-function savePlant(plant) {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = plant.id ? store.put(plant) : store.add(plant);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
+async function savePlant(plant) {
+    if (plant.id) {
+        // Update existing plant
+        const { data, error } = await supabase.from('plants').update(plant).eq('id', plant.id).select().single();
+        if (error) throw error;
+        return data;
+    } else {
+        // Insert new plant
+        const { data, error } = await supabase.from('plants').insert([plant]).select().single();
+        if (error) throw error;
+        return data;
+    }
 }
 
-function deletePlantFromDB(id) {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = store.delete(id);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-    });
+async function deletePlantFromDB(id) {
+    const { error } = await supabase.from('plants').delete().eq('id', id);
+    if (error) throw error;
 }
 
 // DOM Elements
@@ -98,12 +75,64 @@ let toastTimeout;
 let activeUndoAction = null;
 
 // Utilities
+// Utilities
+
+// Helper function required to convert the VAPID key for the browser
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/\-/g, '+')
+        .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
 async function ensurePermissions() {
-    if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+    if (!('Notification' in window)) return;
+
+    // Ask for permission if not already granted or denied
+    if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
         try {
             await Notification.requestPermission();
         } catch (e) {
             console.error("Permission request failed", e);
+        }
+    }
+
+    // If granted, get the push subscription from Apple and save to Supabase
+    if (Notification.permission === 'granted') {
+        try {
+            const reg = await navigator.serviceWorker.ready;
+            let subscription = await reg.pushManager.getSubscription();
+            
+            if (!subscription) {
+                const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw
+';
+                
+                subscription = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
+                });
+                
+                // Save the unique subscription object to your new Supabase database
+                const { error } = await supabase.from('push_subscriptions').insert([{
+                    subscription: subscription.toJSON()
+                }]);
+                
+                if (error) {
+                    console.error("Error saving subscription to Supabase:", error);
+                } else {
+                    console.log("Push subscription saved successfully!");
+                }
+            }
+        } catch (error) {
+            console.error("Error subscribing to push notifications:", error);
         }
     }
 }
