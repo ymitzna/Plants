@@ -10,21 +10,21 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 // Supabase Setup
 const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function initDB() {
-    return Promise.resolve(); // Kept so the initialization call at the bottom of the file doesn't break
+    return Promise.resolve(); 
 }
 
 // DB Operations
 async function getAllPlants() {
-    const { data, error } = await supabase.from('plants').select('*').order('id', { ascending: true });
+    const { data, error } = await supabaseClient.from('plants').select('*').order('id', { ascending: true });
     if (error) throw error;
     return data || [];
 }
 
 async function getPlant(id) {
-    const { data, error } = await supabase.from('plants').select('*').eq('id', id).single();
+    const { data, error } = await supabaseClient.from('plants').select('*').eq('id', id).single();
     if (error) throw error;
     return data;
 }
@@ -32,19 +32,19 @@ async function getPlant(id) {
 async function savePlant(plant) {
     if (plant.id) {
         // Update existing plant
-        const { data, error } = await supabase.from('plants').update(plant).eq('id', plant.id).select().single();
+        const { data, error } = await supabaseClient.from('plants').update(plant).eq('id', plant.id).select().single();
         if (error) throw error;
         return data;
     } else {
         // Insert new plant
-        const { data, error } = await supabase.from('plants').insert([plant]).select().single();
+        const { data, error } = await supabaseClient.from('plants').insert([plant]).select().single();
         if (error) throw error;
         return data;
     }
 }
 
 async function deletePlantFromDB(id) {
-    const { error } = await supabase.from('plants').delete().eq('id', id);
+    const { error } = await supabaseClient.from('plants').delete().eq('id', id);
     if (error) throw error;
 }
 
