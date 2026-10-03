@@ -120,7 +120,7 @@ async function ensurePermissions() {
                 });
                 
                 // Save the unique subscription object to your new Supabase database
-                const { error } = await supabase.from('push_subscriptions').insert([{
+                const { error } = await supabaseClient.from('push_subscriptions').insert([{
                     subscription: subscription.toJSON()
                 }]);
                 
