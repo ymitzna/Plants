@@ -112,8 +112,7 @@ async function ensurePermissions() {
             let subscription = await reg.pushManager.getSubscription();
             
             if (!subscription) {
-                const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw
-';
+                const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw';
                 
                 subscription = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
