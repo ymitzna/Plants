@@ -50,6 +50,39 @@
         <button id="toast-undo" class="toast-btn" style="display: none;">Undo</button>
     </div>
 
+    <!-- Plant Profile Modal -->
+    <div id="profile-modal" class="modal">
+        <div class="modal-content profile-content">
+            <button id="close-profile-btn" class="close-modal-btn">✕</button>
+            
+            <div id="profile-header-img" class="profile-header-img">
+                <span id="profile-placeholder-emoji" style="font-size: 64px; display: none;">🌱</span>
+            </div>
+            
+            <div class="profile-body">
+                <h2 id="profile-name">Plant Name</h2>
+                <p id="profile-species">Species</p>
+                
+                <div class="profile-status-box">
+                    <span id="profile-status-icon">💧</span>
+                    <span id="profile-status-text">Status text goes here</span>
+                </div>
+
+                <div class="form-group" style="margin-top: 20px;">
+                    <label>Watering History (Every <span id="profile-interval-text">X</span> days)</label>
+                    <div id="profile-history-container" class="history-container">
+                        <!-- History injected here -->
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" id="profile-edit-btn" class="btn-secondary">Edit Details</button>
+                    <button type="button" id="profile-water-btn" class="btn-primary">Water Now</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Add Plant Modal -->
     <div id="add-modal" class="modal">
         <div class="modal-content">
@@ -79,7 +112,7 @@
         </div>
     </div>
 
-    <!-- Edit Plant Modal -->
+    <!-- Edit Plant Modal (Simplified) -->
     <div id="edit-modal" class="modal">
         <div class="modal-content">
             <h2>Edit Plant</h2>
@@ -102,18 +135,13 @@
                     <label for="edit-water-interval">Water every (days)</label>
                     <input type="number" id="edit-water-interval" required min="1">
                 </div>
-                <div class="form-group">
-                    <label>Watering History</label>
-                    <div id="history-container" class="history-container">
-                        <!-- History injected here -->
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" id="delete-btn" class="btn-danger">Delete</button>
+                
+                <div class="modal-actions" style="margin-top: 30px;">
+                    <button type="button" id="delete-btn" class="btn-danger">Delete Plant</button>
                 </div>
                 <div class="modal-actions">
                     <button type="button" id="cancel-edit-btn" class="btn-secondary">Cancel</button>
-                    <button type="submit" class="btn-primary">Update</button>
+                    <button type="submit" class="btn-primary">Save Updates</button>
                 </div>
             </form>
         </div>
