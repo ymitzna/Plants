@@ -549,15 +549,37 @@ plantListEl.addEventListener('touchend', e => {
     const plantId = Number(cardForeground.closest('.plant-card').getAttribute('data-id'));
     const SWIPE_THRESHOLD = 75;
     
+    // Re-enable smooth transition for the snap-back
     cardForeground.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
     
     if (currentX > SWIPE_THRESHOLD) {
-        cardForeground.style.transform = `translate3d(120%, 0, 0)`;
-        setTimeout(() => handleWater(plantId), 250);
+        // Swiped Right -> Water
+        cardForeground.style.transform = `translate3d(0, 0, 0)`; // Snap back to center
+        cardForeground.classList.add('watered-pulse'); // Play green glow
+        
+        // Fade the background action out smoothly as it snaps back
+        setTimeout(() => {
+            if (bgWater) bgWater.style.opacity = '0';
+            if (bgSnooze) bgSnooze.style.opacity = '0';
+        }, 150);
+        
+        // Wait for the pulse animation to finish before rebuilding the DOM
+        setTimeout(() => handleWater(plantId), 400); 
+        
     } else if (currentX < -SWIPE_THRESHOLD) {
-        cardForeground.style.transform = `translate3d(-120%, 0, 0)`;
-        setTimeout(() => handleSnooze(plantId), 250);
+        // Swiped Left -> Snooze
+        cardForeground.style.transform = `translate3d(0, 0, 0)`; 
+        cardForeground.classList.add('snoozed-pulse'); 
+        
+        setTimeout(() => {
+            if (bgWater) bgWater.style.opacity = '0';
+            if (bgSnooze) bgSnooze.style.opacity = '0';
+        }, 150);
+        
+        setTimeout(() => handleSnooze(plantId), 400);
+        
     } else {
+        // Did not cross threshold, just snap back without action
         cardForeground.style.transform = `translate3d(0, 0, 0)`;
         setTimeout(() => {
             if (bgWater) bgWater.style.opacity = '0';
