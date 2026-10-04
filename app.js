@@ -12,7 +12,7 @@ const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// LOCAL STATE (Crucial for instant performance)
+// LOCAL STATE
 let localPlants = [];
 
 async function initDB() {
@@ -96,7 +96,7 @@ async function ensurePermissions() {
             const reg = await navigator.serviceWorker.ready;
             let subscription = await reg.pushManager.getSubscription();
             if (!subscription) {
-                const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw';
+                const publicVapidKey = 'BOeEj0z9GYULAs84kxllq63lwRTCzK_3ebaRr14g_ElZb9RDCBrsGHlyOKketrTrt0RI79PyO5614gqEt4UhkaU';
                 subscription = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
@@ -219,7 +219,7 @@ function renderHistoryList(historyArray) {
 
 // Optimistic Action Handlers
 function handleWater(plantId, skipRender = false) {
-    ensurePermissions(); // Runs in background
+    ensurePermissions(); 
     
     const plantIndex = localPlants.findIndex(p => p.id === plantId);
     if (plantIndex === -1) return;
@@ -233,12 +233,12 @@ function handleWater(plantId, skipRender = false) {
     plant.history.push(now);
     plant.snoozedUntil = null; 
     
-    if (!skipRender) renderPlants(); // Instant UI Update
+    if (!skipRender) renderPlants(); 
     
     showToast(`${plant.name} watered!`, () => {
         localPlants[plantIndex] = oldState;
         renderPlants();
-        savePlant(oldState); // Send undo to database
+        savePlant(oldState); 
         showToast('Watering undone.');
     });
     
@@ -256,7 +256,7 @@ function handleSnooze(plantId) {
     const currentTarget = Math.max(lastWatered + (plant.interval * MS_PER_DAY), plant.snoozedUntil || 0, Date.now());
     plant.snoozedUntil = currentTarget + MS_PER_DAY;
     
-    renderPlants(); // Instant UI Update
+    renderPlants(); 
     
     showToast(`${plant.name} snoozed for 1 day.`, () => {
         localPlants[plantIndex] = oldState;
@@ -268,12 +268,11 @@ function handleSnooze(plantId) {
     savePlant(plant).catch(e => console.error("Background sync failed", e));
 }
 
-// Synchronous Core Rendering (Instant)
+// Synchronous Core Rendering
 function renderPlants() {
     plantListEl.innerHTML = '';
     const now = Date.now();
     
-    // Map status strictly using local memory
     let plants = localPlants.map(plant => ({ ...plant, computedStatus: calculatePlantStatus(plant, now) }));
     updateAppBadgeAndNotify(plants);
 
@@ -374,7 +373,7 @@ waterAllBtn.addEventListener('click', () => {
             if (!plant.history) plant.history = [];
             plant.history.push(now);
             plant.snoozedUntil = null;
-            savePlant(plant); // Background sync
+            savePlant(plant); 
             wateredCount++;
         }
     });
@@ -401,7 +400,6 @@ addForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     ensurePermissions(); 
     
-    // Disable button to prevent double-submit
     const submitBtn = e.target.querySelector('button[type="submit"]');
     submitBtn.textContent = 'Saving...';
     submitBtn.disabled = true;
@@ -415,7 +413,6 @@ addForm.addEventListener('submit', async (e) => {
     const interval = parseInt(document.getElementById('water-interval').value, 10);
     const now = Date.now();
     
-    // Await addition so we get the real DB ID back for the new object
     const savedPlant = await savePlant({
         name, species, interval, lastWatered: now, history: [now], snoozedUntil: null, photo: photoDataUrl
     });
@@ -512,46 +509,62 @@ profileEditBtn.addEventListener('click', () => {
 // HARDWARE ACCELERATED SWIPE GESTURES
 let startX = 0;
 let currentX = 0;
+let rawX = 0;
 let swipingCard = null;
+let bgWater = null;
+let bgSnooze = null;
 let wasSwiped = false; 
-let ticking = false; // Controls RequestAnimationFrame loop
+let isSwiping = false;
+
+// 60-FPS continuous render loop decoupled from touch events
+function swipeLoop() {
+    if (!isSwiping || !swipingCard) return;
+
+    if (rawX > 120) currentX = 120 + (rawX - 120) * 0.2;
+    else if (rawX < -120) currentX = -120 + (rawX + 120) * 0.2;
+    else currentX = rawX;
+
+    if (currentX > 0 && bgWater && bgSnooze) {
+        bgWater.style.opacity = '1';
+        bgSnooze.style.opacity = '0';
+    } else if (currentX < 0 && bgWater && bgSnooze) {
+        bgWater.style.opacity = '0';
+        bgSnooze.style.opacity = '1';
+    }
+
+    swipingCard.style.transform = `translate3d(${currentX}px, 0, 0)`;
+    requestAnimationFrame(swipeLoop);
+}
 
 plantListEl.addEventListener('touchstart', e => {
     const card = e.target.closest('.card-foreground');
     if (!card) return;
     
     wasSwiped = false;
+    isSwiping = true;
     swipingCard = card;
+    
+    bgWater = swipingCard.parentElement.querySelector('.bg-water');
+    bgSnooze = swipingCard.parentElement.querySelector('.bg-snooze');
+    
     startX = e.touches[0].clientX;
+    rawX = 0;
+    currentX = 0;
+    
     card.style.transition = 'none'; 
+    requestAnimationFrame(swipeLoop);
 }, { passive: true });
 
 plantListEl.addEventListener('touchmove', e => {
     if (!swipingCard) return;
-    currentX = e.touches[0].clientX - startX;
-    
-    if (Math.abs(currentX) > 10) wasSwiped = true;
-    
-    // Physics resistance logic
-    if (currentX > 120) currentX = 120 + (currentX - 120) * 0.2;
-    if (currentX < -120) currentX = -120 + (currentX + 120) * 0.2;
-    
-    // FPS Optimization: Only paint if a frame is ready
-    if (!ticking) {
-        window.requestAnimationFrame(() => {
-            if (swipingCard) {
-                // translate3d forces the GPU to render the animation instead of CPU
-                swipingCard.style.transform = `translate3d(${currentX}px, 0, 0)`;
-            }
-            ticking = false;
-        });
-        ticking = true;
-    }
+    rawX = e.touches[0].clientX - startX;
+    if (Math.abs(rawX) > 10) wasSwiped = true;
 }, { passive: true });
 
 plantListEl.addEventListener('touchend', e => {
     if (!swipingCard) return;
     
+    isSwiping = false; 
     const cardForeground = swipingCard;
     const plantId = Number(cardForeground.closest('.plant-card').getAttribute('data-id'));
     const SWIPE_THRESHOLD = 75;
@@ -566,11 +579,15 @@ plantListEl.addEventListener('touchend', e => {
         setTimeout(() => handleSnooze(plantId), 250);
     } else {
         cardForeground.style.transform = `translate3d(0, 0, 0)`;
+        setTimeout(() => {
+            if (bgWater) bgWater.style.opacity = '0';
+            if (bgSnooze) bgSnooze.style.opacity = '0';
+        }, 300);
     }
     
     swipingCard = null;
-    currentX = 0;
-    ticking = false;
+    bgWater = null;
+    bgSnooze = null;
 });
 
 plantListEl.addEventListener('click', e => {
@@ -602,7 +619,7 @@ editForm.addEventListener('submit', async (e) => {
     const fileInput = document.getElementById('edit-plant-photo');
     if (fileInput.files.length > 0) plant.photo = await compressImage(fileInput.files[0]);
 
-    renderPlants(); // Instant update
+    renderPlants(); 
     editModal.classList.remove('show');
     
     showToast('Plant updated successfully.', () => {
