@@ -12,8 +12,12 @@ const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-function initDB() {
-    return Promise.resolve(); 
+// LOCAL STATE (Crucial for instant performance)
+let localPlants = [];
+
+async function initDB() {
+    localPlants = await getAllPlants();
+    renderPlants();
 }
 
 // DB Operations
@@ -23,20 +27,12 @@ async function getAllPlants() {
     return data || [];
 }
 
-async function getPlant(id) {
-    const { data, error } = await supabaseClient.from('plants').select('*').eq('id', id).single();
-    if (error) throw error;
-    return data;
-}
-
 async function savePlant(plant) {
     if (plant.id) {
-        // Update existing plant
         const { data, error } = await supabaseClient.from('plants').update(plant).eq('id', plant.id).select().single();
         if (error) throw error;
         return data;
     } else {
-        // Insert new plant
         const { data, error } = await supabaseClient.from('plants').insert([plant]).select().single();
         if (error) throw error;
         return data;
@@ -56,14 +52,12 @@ const exportBtn = document.getElementById('export-btn');
 const cancelAddBtn = document.getElementById('cancel-add-btn');
 const addForm = document.getElementById('add-form');
 
-// Profile DOM Elements
 const profileModal = document.getElementById('profile-modal');
 const closeProfileBtn = document.getElementById('close-profile-btn');
 const profileEditBtn = document.getElementById('profile-edit-btn');
 const profileWaterBtn = document.getElementById('profile-water-btn');
 const historyContainer = document.getElementById('profile-history-container');
 
-// Edit DOM Elements
 const editModal = document.getElementById('edit-modal');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const editForm = document.getElementById('edit-form');
@@ -85,16 +79,10 @@ let currentProfilePlantId = null;
 // Utilities
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding)
-        .replace(/\-/g, '+')
-        .replace(/_/g, '/');
-
+    const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
     const rawData = window.atob(base64);
     const outputArray = new Uint8Array(rawData.length);
-
-    for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-    }
+    for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
     return outputArray;
 }
 
@@ -108,7 +96,7 @@ async function ensurePermissions() {
             const reg = await navigator.serviceWorker.ready;
             let subscription = await reg.pushManager.getSubscription();
             if (!subscription) {
-                const publicVapidKey = 'BOeEj0z9GYULAs84kxllq63lwRTCzK_3ebaRr14g_ElZb9RDCBrsGHlyOKketrTrt0RI79PyO5614gqEt4UhkaU';
+                const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw';
                 subscription = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
@@ -119,7 +107,7 @@ async function ensurePermissions() {
     }
 }
 
-async function updateAppBadgeAndNotify(plants) {
+function updateAppBadgeAndNotify(plants) {
     let overdueCount = 0;
     const now = Date.now();
     plants.forEach(plant => {
@@ -128,22 +116,7 @@ async function updateAppBadgeAndNotify(plants) {
     });
 
     if ('setAppBadge' in navigator) {
-        try { overdueCount > 0 ? await navigator.setAppBadge(overdueCount) : await navigator.clearAppBadge(); } catch (e) {}
-    }
-
-    if ('Notification' in window && Notification.permission === 'granted' && overdueCount > 0) {
-        const lastNotified = localStorage.getItem('lastNotifiedDate');
-        const today = new Date().toDateString();
-        if (lastNotified !== today) {
-            navigator.serviceWorker.ready.then(reg => {
-                reg.showNotification('Plants Need Water!', {
-                    body: `You have ${overdueCount} plant(s) ready to be watered today.`,
-                    icon: 'icon-192.png',
-                    badge: 'icon-192.png'
-                });
-            });
-            localStorage.setItem('lastNotifiedDate', today);
-        }
+        try { overdueCount > 0 ? navigator.setAppBadge(overdueCount) : navigator.clearAppBadge(); } catch (e) {}
     }
 }
 
@@ -172,10 +145,9 @@ toastUndoBtn.addEventListener('click', () => {
     }
 });
 
-exportBtn.addEventListener('click', async () => {
+exportBtn.addEventListener('click', () => {
     try {
-        const plants = await getAllPlants();
-        const dataStr = JSON.stringify(plants, null, 2);
+        const dataStr = JSON.stringify(localPlants, null, 2);
         const blob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -245,53 +217,64 @@ function renderHistoryList(historyArray) {
     });
 }
 
-// Action Handlers
-async function handleWater(plantId, skipRender = false) {
-    const plant = await getPlant(plantId);
-    await ensurePermissions(); 
-    const now = Date.now();
+// Optimistic Action Handlers
+function handleWater(plantId, skipRender = false) {
+    ensurePermissions(); // Runs in background
+    
+    const plantIndex = localPlants.findIndex(p => p.id === plantId);
+    if (plantIndex === -1) return;
+    
+    const plant = localPlants[plantIndex];
     const oldState = JSON.parse(JSON.stringify(plant)); 
-
+    
+    const now = Date.now();
     plant.lastWatered = now;
     if (!plant.history) plant.history = [];
     plant.history.push(now);
     plant.snoozedUntil = null; 
     
-    await savePlant(plant);
-    if (!skipRender) renderPlants();
+    if (!skipRender) renderPlants(); // Instant UI Update
     
-    showToast(`${plant.name} watered!`, async () => {
-        await savePlant(oldState);
+    showToast(`${plant.name} watered!`, () => {
+        localPlants[plantIndex] = oldState;
         renderPlants();
+        savePlant(oldState); // Send undo to database
         showToast('Watering undone.');
     });
+    
+    savePlant(plant).catch(e => console.error("Background sync failed", e)); 
 }
 
-async function handleSnooze(plantId) {
-    const plant = await getPlant(plantId);
+function handleSnooze(plantId) {
+    const plantIndex = localPlants.findIndex(p => p.id === plantId);
+    if (plantIndex === -1) return;
+    
+    const plant = localPlants[plantIndex];
     const oldState = JSON.parse(JSON.stringify(plant)); 
     
     const lastWatered = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
     const currentTarget = Math.max(lastWatered + (plant.interval * MS_PER_DAY), plant.snoozedUntil || 0, Date.now());
     plant.snoozedUntil = currentTarget + MS_PER_DAY;
     
-    await savePlant(plant);
-    renderPlants();
+    renderPlants(); // Instant UI Update
     
-    showToast(`${plant.name} snoozed for 1 day.`, async () => {
-        await savePlant(oldState);
+    showToast(`${plant.name} snoozed for 1 day.`, () => {
+        localPlants[plantIndex] = oldState;
         renderPlants();
+        savePlant(oldState);
         showToast('Snooze undone.');
     });
+    
+    savePlant(plant).catch(e => console.error("Background sync failed", e));
 }
 
-// Core Rendering
-async function renderPlants() {
+// Synchronous Core Rendering (Instant)
+function renderPlants() {
     plantListEl.innerHTML = '';
     const now = Date.now();
-    let plants = await getAllPlants();
     
-    plants = plants.map(plant => ({ ...plant, computedStatus: calculatePlantStatus(plant, now) }));
+    // Map status strictly using local memory
+    let plants = localPlants.map(plant => ({ ...plant, computedStatus: calculatePlantStatus(plant, now) }));
     updateAppBadgeAndNotify(plants);
 
     const searchTerm = searchInput.value.toLowerCase();
@@ -302,9 +285,7 @@ async function renderPlants() {
     
     if (filterTerm === 'due') plants = plants.filter(p => p.computedStatus.daysLeft <= 0);
     
-    const allPlants = await getAllPlants();
-    allPlants.forEach(p => { if (calculatePlantStatus(p, now).daysLeft <= 0) dueCount++; });
-
+    localPlants.forEach(p => { if (calculatePlantStatus(p, now).daysLeft <= 0) dueCount++; });
     waterAllBtn.style.display = dueCount > 0 && plants.length > 0 ? 'block' : 'none';
 
     const sortTerm = sortSelect.value;
@@ -380,30 +361,30 @@ searchInput.addEventListener('input', renderPlants);
 filterSelect.addEventListener('change', renderPlants);
 sortSelect.addEventListener('change', renderPlants);
 
-waterAllBtn.addEventListener('click', async () => {
-    await ensurePermissions();
+waterAllBtn.addEventListener('click', () => {
+    ensurePermissions();
     const now = Date.now();
-    const plants = await getAllPlants();
     let wateredCount = 0;
-    const oldPlantsState = JSON.parse(JSON.stringify(plants));
+    const oldPlantsState = JSON.parse(JSON.stringify(localPlants));
 
-    for (let plant of plants) {
+    localPlants.forEach(plant => {
         const { daysLeft } = calculatePlantStatus(plant, now);
         if (daysLeft <= 0) {
             plant.lastWatered = now;
             if (!plant.history) plant.history = [];
             plant.history.push(now);
             plant.snoozedUntil = null;
-            await savePlant(plant);
+            savePlant(plant); // Background sync
             wateredCount++;
         }
-    }
+    });
 
     if (wateredCount > 0) {
         renderPlants();
-        showToast(`Watered ${wateredCount} plant(s)!`, async () => {
-            for (let oldPlant of oldPlantsState) await savePlant(oldPlant);
+        showToast(`Watered ${wateredCount} plant(s)!`, () => {
+            localPlants = oldPlantsState;
             renderPlants();
+            localPlants.forEach(p => savePlant(p));
             showToast('Bulk watering undone.');
         });
     }
@@ -411,7 +392,6 @@ waterAllBtn.addEventListener('click', async () => {
 
 // Add Plant
 addBtn.addEventListener('click', () => addModal.classList.add('show'));
-
 cancelAddBtn.addEventListener('click', () => {
     addModal.classList.remove('show');
     setTimeout(() => addForm.reset(), 300); 
@@ -419,7 +399,12 @@ cancelAddBtn.addEventListener('click', () => {
 
 addForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    await ensurePermissions(); 
+    ensurePermissions(); 
+    
+    // Disable button to prevent double-submit
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.textContent = 'Saving...';
+    submitBtn.disabled = true;
 
     const fileInput = document.getElementById('plant-photo');
     let photoDataUrl = null;
@@ -430,19 +415,26 @@ addForm.addEventListener('submit', async (e) => {
     const interval = parseInt(document.getElementById('water-interval').value, 10);
     const now = Date.now();
     
-    await savePlant({
+    // Await addition so we get the real DB ID back for the new object
+    const savedPlant = await savePlant({
         name, species, interval, lastWatered: now, history: [now], snoozedUntil: null, photo: photoDataUrl
     });
 
+    localPlants.push(savedPlant);
     renderPlants();
+    
     addModal.classList.remove('show');
-    setTimeout(() => addForm.reset(), 300);
+    setTimeout(() => {
+        addForm.reset();
+        submitBtn.textContent = 'Save';
+        submitBtn.disabled = false;
+    }, 300);
     showToast(`${name} added!`);
 });
 
 // Profile View Logic
-async function openProfileModal(plantId) {
-    const plant = await getPlant(plantId);
+function openProfileModal(plantId) {
+    const plant = localPlants.find(p => p.id === plantId);
     if (!plant) return;
     
     currentProfilePlantId = plantId;
@@ -488,19 +480,16 @@ closeProfileBtn.addEventListener('click', () => {
     currentProfilePlantId = null;
 });
 
-profileWaterBtn.addEventListener('click', async () => {
+profileWaterBtn.addEventListener('click', () => {
     if (!currentProfilePlantId) return;
-    await handleWater(currentProfilePlantId, true);
-    
-    // Refresh modal data instantly
+    handleWater(currentProfilePlantId, true);
     openProfileModal(currentProfilePlantId); 
     renderPlants();
 });
 
-// Open Edit Modal from Profile
-profileEditBtn.addEventListener('click', async () => {
+profileEditBtn.addEventListener('click', () => {
     if (!currentProfilePlantId) return;
-    const plant = await getPlant(currentProfilePlantId);
+    const plant = localPlants.find(p => p.id === currentProfilePlantId);
     
     document.getElementById('edit-plant-id').value = plant.id;
     document.getElementById('edit-plant-name').value = plant.name;
@@ -520,11 +509,12 @@ profileEditBtn.addEventListener('click', async () => {
 });
 
 
-// Tap vs Swipe Gesture Logic
+// HARDWARE ACCELERATED SWIPE GESTURES
 let startX = 0;
 let currentX = 0;
 let swipingCard = null;
-let wasSwiped = false; // Flag to prevent tap if we swiped
+let wasSwiped = false; 
+let ticking = false; // Controls RequestAnimationFrame loop
 
 plantListEl.addEventListener('touchstart', e => {
     const card = e.target.closest('.card-foreground');
@@ -542,10 +532,21 @@ plantListEl.addEventListener('touchmove', e => {
     
     if (Math.abs(currentX) > 10) wasSwiped = true;
     
+    // Physics resistance logic
     if (currentX > 120) currentX = 120 + (currentX - 120) * 0.2;
     if (currentX < -120) currentX = -120 + (currentX + 120) * 0.2;
     
-    swipingCard.style.transform = `translateX(${currentX}px)`;
+    // FPS Optimization: Only paint if a frame is ready
+    if (!ticking) {
+        window.requestAnimationFrame(() => {
+            if (swipingCard) {
+                // translate3d forces the GPU to render the animation instead of CPU
+                swipingCard.style.transform = `translate3d(${currentX}px, 0, 0)`;
+            }
+            ticking = false;
+        });
+        ticking = true;
+    }
 }, { passive: true });
 
 plantListEl.addEventListener('touchend', e => {
@@ -558,27 +559,24 @@ plantListEl.addEventListener('touchend', e => {
     cardForeground.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
     
     if (currentX > SWIPE_THRESHOLD) {
-        cardForeground.style.transform = `translateX(120%)`;
+        cardForeground.style.transform = `translate3d(120%, 0, 0)`;
         setTimeout(() => handleWater(plantId), 250);
     } else if (currentX < -SWIPE_THRESHOLD) {
-        cardForeground.style.transform = `translateX(-120%)`;
+        cardForeground.style.transform = `translate3d(-120%, 0, 0)`;
         setTimeout(() => handleSnooze(plantId), 250);
     } else {
-        cardForeground.style.transform = `translateX(0)`;
+        cardForeground.style.transform = `translate3d(0, 0, 0)`;
     }
     
     swipingCard = null;
     currentX = 0;
+    ticking = false;
 });
 
-// Click Listener for Tap-to-View Profile
 plantListEl.addEventListener('click', e => {
-    // If the user was dragging the card, prevent the tap event
     if (wasSwiped) return; 
-    
     const card = e.target.closest('.card-foreground');
     if (!card) return;
-    
     const plantId = Number(card.closest('.plant-card').getAttribute('data-id'));
     openProfileModal(plantId);
 });
@@ -592,7 +590,9 @@ cancelEditBtn.addEventListener('click', () => {
 editForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = Number(document.getElementById('edit-plant-id').value);
-    const plant = await getPlant(id);
+    
+    const plantIndex = localPlants.findIndex(p => p.id === id);
+    const plant = localPlants[plantIndex];
     const oldState = JSON.parse(JSON.stringify(plant)); 
     
     plant.name = document.getElementById('edit-plant-name').value;
@@ -602,33 +602,39 @@ editForm.addEventListener('submit', async (e) => {
     const fileInput = document.getElementById('edit-plant-photo');
     if (fileInput.files.length > 0) plant.photo = await compressImage(fileInput.files[0]);
 
-    await savePlant(plant);
-    renderPlants();
+    renderPlants(); // Instant update
     editModal.classList.remove('show');
     
-    showToast('Plant updated successfully.', async () => {
-        await savePlant(oldState);
+    showToast('Plant updated successfully.', () => {
+        localPlants[plantIndex] = oldState;
         renderPlants();
+        savePlant(oldState);
         showToast('Edits undone.');
     });
+    
+    savePlant(plant).catch(err => console.error(err));
 });
 
-deleteBtn.addEventListener('click', async () => {
+deleteBtn.addEventListener('click', () => {
     const id = Number(document.getElementById('edit-plant-id').value);
-    const plant = await getPlant(id);
+    const plantIndex = localPlants.findIndex(p => p.id === id);
+    const plant = localPlants[plantIndex];
     
     if(confirm(`Are you sure you want to delete ${plant.name}?`)) {
-        await deletePlantFromDB(id);
+        localPlants.splice(plantIndex, 1);
         renderPlants();
         editModal.classList.remove('show');
         
-        showToast(`${plant.name} deleted.`, async () => {
-            await savePlant(plant); 
+        showToast(`${plant.name} deleted.`, () => {
+            localPlants.push(plant); 
             renderPlants();
+            savePlant(plant);
             showToast('Deletion undone.');
         });
+        
+        deletePlantFromDB(id).catch(err => console.error(err));
     }
 });
 
-// Initialize
-initDB().then(() => renderPlants()).catch(err => console.error(err));
+// Initialize App
+initDB().catch(err => console.error(err));
