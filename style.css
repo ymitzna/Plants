@@ -177,24 +177,24 @@ h1 {
 .bg-action {
     position: absolute;
     top: 0;
+    left: 0;
     height: 100%;
-    width: 50%;
+    width: 100%;
     display: flex;
     align-items: center;
     font-weight: 700;
     font-size: 16px;
     color: white;
+    opacity: 0;
 }
 
 .bg-water {
-    left: 0;
     background-color: var(--accent-color);
     padding-left: 24px;
     justify-content: flex-start;
 }
 
 .bg-snooze {
-    right: 0;
     background-color: var(--divider-color);
     color: var(--text-primary);
     padding-right: 24px;
