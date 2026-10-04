@@ -75,7 +75,6 @@ let toastTimeout;
 let activeUndoAction = null;
 
 // Utilities
-// Utilities
 
 // Helper function required to convert the VAPID key for the browser
 function urlBase64ToUint8Array(base64String) {
@@ -112,7 +111,8 @@ async function ensurePermissions() {
             let subscription = await reg.pushManager.getSubscription();
             
             if (!subscription) {
-                const publicVapidKey = 'BOeEj0z9GYULAs84kxllq63lwRTCzK_3ebaRr14g_ElZb9RDCBrsGHlyOKketrTrt0RI79PyO5614gqEt4UhkaU';
+                // Ensure this publicVapidKey matches the one updated during troubleshooting
+                const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw';
                 
                 subscription = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
@@ -283,6 +283,46 @@ function renderHistoryList(historyArray) {
     });
 }
 
+// Action Handlers
+async function handleWater(plantId) {
+    const plant = await getPlant(plantId);
+    await ensurePermissions(); 
+    const now = Date.now();
+    const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
+
+    plant.lastWatered = now;
+    if (!plant.history) plant.history = [];
+    plant.history.push(now);
+    plant.snoozedUntil = null; 
+    
+    await savePlant(plant);
+    renderPlants();
+    
+    showToast(`${plant.name} watered!`, async () => {
+        await savePlant(oldState);
+        renderPlants();
+        showToast('Watering undone.');
+    });
+}
+
+async function handleSnooze(plantId) {
+    const plant = await getPlant(plantId);
+    const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
+    
+    const lastWatered = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
+    const currentTarget = Math.max(lastWatered + (plant.interval * MS_PER_DAY), plant.snoozedUntil || 0, Date.now());
+    plant.snoozedUntil = currentTarget + MS_PER_DAY;
+    
+    await savePlant(plant);
+    renderPlants();
+    
+    showToast(`${plant.name} snoozed for 1 day.`, async () => {
+        await savePlant(oldState);
+        renderPlants();
+        showToast('Snooze undone.');
+    });
+}
+
 // Core Rendering
 async function renderPlants() {
     plantListEl.innerHTML = '';
@@ -323,7 +363,7 @@ async function renderPlants() {
     if (plants.length === 0) {
         plantListEl.innerHTML = `
             <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
-                <div style="font-size: 54px; margin-bottom: 16px;">🪴</div>
+                <div style="font-size: 54px; margin-bottom: 16px;">🌱</div>
                 <h3 style="color: var(--text-primary); margin-bottom: 8px;">No Plants Found</h3>
             </div>
         `;
@@ -359,34 +399,39 @@ async function renderPlants() {
 
         const photoHtml = plant.photo 
             ? `<img src="${plant.photo}" alt="${plant.name}">` 
-            : `🪴`;
+            : `🌱`;
 
         const card = document.createElement('div');
         card.className = 'plant-card';
+        card.setAttribute('data-id', plant.id);
+        
         card.innerHTML = `
-            <div class="plant-header">
-                <div class="plant-photo-container">${photoHtml}</div>
-                <div class="plant-info">
-                    <h3>${plant.name}</h3>
-                    ${plant.species ? `<div class="plant-species">${plant.species}</div>` : ''}
+            <div class="card-background">
+                <div class="bg-action bg-water">💧 Water</div>
+                <div class="bg-action bg-snooze">💤 Snooze</div>
+            </div>
+            <div class="card-foreground">
+                <div class="plant-header" style="margin-bottom: 0;">
                     
-                    <div class="status-row">
-                        <span class="status-symbol" style="color: ${progressColor};">💧</span>
-                        <p class="plant-status ${isOverdue ? 'overdue' : ''}">${statusText}</p>
+                    <div class="plant-photo-ring" style="background: conic-gradient(${progressColor} ${progressPercent}%, var(--divider-color) 0);">
+                        <div class="plant-photo-container">${photoHtml}</div>
                     </div>
                     
-                    <div class="last-watered-text">Last watered: ${lastWateredFormatted}</div>
+                    <div class="plant-info">
+                        <h3>${plant.name}</h3>
+                        ${plant.species ? `<div class="plant-species">${plant.species}</div>` : ''}
+                        
+                        <div class="status-row">
+                            <p class="plant-status ${isOverdue ? 'overdue' : ''}" style="color: ${progressColor};">${statusText}</p>
+                        </div>
+                        
+                        <div class="last-watered-text">Last watered: ${lastWateredFormatted}</div>
+                        
+                        <div style="margin-top: 12px;">
+                            <button class="edit-btn" data-id="${plant.id}" style="padding: 0;">Edit / History</button>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            
-            <div style="width: 100%; background: var(--divider-color); height: 6px; border-radius: 3px; margin-bottom: 16px; overflow: hidden;">
-                <div style="width: ${progressPercent}%; background: ${progressColor}; height: 100%; transition: width 0.3s ease;"></div>
-            </div>
-
-            <div class="card-actions">
-                <button class="snooze-btn" data-id="${plant.id}">+1 Day</button>
-                <button class="water-btn" data-id="${plant.id}">Watered</button>
-                <button class="edit-btn" data-id="${plant.id}">Edit</button>
             </div>
         `;
         plantListEl.appendChild(card);
@@ -453,7 +498,11 @@ addForm.addEventListener('submit', async (e) => {
     await ensurePermissions(); 
 
     const fileInput = document.getElementById('plant-photo');
-    const photoDataUrl = await compressImage(fileInput.files[0]);
+    let photoDataUrl = null;
+    if (fileInput.files.length > 0) {
+        photoDataUrl = await compressImage(fileInput.files[0]);
+    }
+
     const name = document.getElementById('plant-name').value;
     const species = document.getElementById('plant-species').value;
     const interval = parseInt(document.getElementById('water-interval').value, 10);
@@ -475,55 +524,13 @@ addForm.addEventListener('submit', async (e) => {
     showToast(`${name} added!`);
 });
 
-// List Actions
+// Edit Listener
 plantListEl.addEventListener('click', async (e) => {
-    const id = e.target.getAttribute('data-id');
-    if (!id) return;
-    const plantId = Number(id);
-    const plant = await getPlant(plantId);
-    if (!plant) return;
-    
-    // Water Action
-    if (e.target.classList.contains('water-btn')) {
-        await ensurePermissions(); 
-        const now = Date.now();
-        const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
-
-        plant.lastWatered = now;
-        if (!plant.history) plant.history = [];
-        plant.history.push(now);
-        plant.snoozedUntil = null; 
-        
-        await savePlant(plant);
-        renderPlants();
-        
-        showToast(`${plant.name} watered!`, async () => {
-            await savePlant(oldState);
-            renderPlants();
-            showToast('Watering undone.');
-        });
-    }
-
-    // Snooze Action
-    if (e.target.classList.contains('snooze-btn')) {
-        const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
-        
-        const lastWatered = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
-        const currentTarget = Math.max(lastWatered + (plant.interval * MS_PER_DAY), plant.snoozedUntil || 0, Date.now());
-        plant.snoozedUntil = currentTarget + MS_PER_DAY;
-        
-        await savePlant(plant);
-        renderPlants();
-        
-        showToast(`${plant.name} snoozed for 1 day.`, async () => {
-            await savePlant(oldState);
-            renderPlants();
-            showToast('Snooze undone.');
-        });
-    }
-    
-    // Open Edit Modal
     if (e.target.classList.contains('edit-btn')) {
+        const id = Number(e.target.getAttribute('data-id'));
+        const plant = await getPlant(id);
+        if (!plant) return;
+
         document.getElementById('edit-plant-id').value = plant.id;
         document.getElementById('edit-plant-name').value = plant.name;
         document.getElementById('edit-plant-species').value = plant.species || '';
@@ -538,12 +545,66 @@ plantListEl.addEventListener('click', async (e) => {
         }
 
         renderHistoryList(plant.history || [plant.lastWatered]);
-
         editModal.classList.add('show');
     }
 });
 
-// Edit & Delete
+// Swipe Gesture Logic
+let startX = 0;
+let currentX = 0;
+let swipingCard = null;
+
+plantListEl.addEventListener('touchstart', e => {
+    // Ignore swipe if clicking the edit button directly
+    if (e.target.classList.contains('edit-btn')) return;
+    
+    const card = e.target.closest('.card-foreground');
+    if (!card) return;
+    
+    swipingCard = card;
+    startX = e.touches[0].clientX;
+    card.style.transition = 'none'; // Remove transition for instant dragging
+}, { passive: true });
+
+plantListEl.addEventListener('touchmove', e => {
+    if (!swipingCard) return;
+    currentX = e.touches[0].clientX - startX;
+    
+    // Add physical resistance feeling at the edges
+    if (currentX > 120) currentX = 120 + (currentX - 120) * 0.2;
+    if (currentX < -120) currentX = -120 + (currentX + 120) * 0.2;
+    
+    swipingCard.style.transform = `translateX(${currentX}px)`;
+}, { passive: true });
+
+plantListEl.addEventListener('touchend', e => {
+    if (!swipingCard) return;
+    
+    const cardForeground = swipingCard;
+    const plantId = Number(cardForeground.closest('.plant-card').getAttribute('data-id'));
+    const SWIPE_THRESHOLD = 75; // Pixels required to trigger the action
+    
+    // Re-enable smooth transition for the snap animation
+    cardForeground.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+    
+    if (currentX > SWIPE_THRESHOLD) {
+        // Swiped Right -> Water
+        cardForeground.style.transform = `translateX(120%)`;
+        setTimeout(() => handleWater(plantId), 250);
+    } else if (currentX < -SWIPE_THRESHOLD) {
+        // Swiped Left -> Snooze
+        cardForeground.style.transform = `translateX(-120%)`;
+        setTimeout(() => handleSnooze(plantId), 250);
+    } else {
+        // Did not cross threshold, snap back to center
+        cardForeground.style.transform = `translateX(0)`;
+    }
+    
+    swipingCard = null;
+    currentX = 0;
+});
+
+// Edit & Delete Handlers
 cancelEditBtn.addEventListener('click', () => {
     editModal.classList.remove('show');
     setTimeout(() => editForm.reset(), 300);
