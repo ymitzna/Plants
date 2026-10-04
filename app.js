@@ -56,11 +56,18 @@ const exportBtn = document.getElementById('export-btn');
 const cancelAddBtn = document.getElementById('cancel-add-btn');
 const addForm = document.getElementById('add-form');
 
+// Profile DOM Elements
+const profileModal = document.getElementById('profile-modal');
+const closeProfileBtn = document.getElementById('close-profile-btn');
+const profileEditBtn = document.getElementById('profile-edit-btn');
+const profileWaterBtn = document.getElementById('profile-water-btn');
+const historyContainer = document.getElementById('profile-history-container');
+
+// Edit DOM Elements
 const editModal = document.getElementById('edit-modal');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const editForm = document.getElementById('edit-form');
 const deleteBtn = document.getElementById('delete-btn');
-const historyContainer = document.getElementById('history-container');
 
 const toastEl = document.getElementById('toast');
 const toastMessageEl = document.getElementById('toast-message');
@@ -73,10 +80,9 @@ const waterAllBtn = document.getElementById('water-all-btn');
 
 let toastTimeout;
 let activeUndoAction = null;
+let currentProfilePlantId = null;
 
 // Utilities
-
-// Helper function required to convert the VAPID key for the browser
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64 = (base64String + padding)
@@ -94,74 +100,40 @@ function urlBase64ToUint8Array(base64String) {
 
 async function ensurePermissions() {
     if (!('Notification' in window)) return;
-
-    // Ask for permission if not already granted or denied
     if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-        try {
-            await Notification.requestPermission();
-        } catch (e) {
-            console.error("Permission request failed", e);
-        }
+        try { await Notification.requestPermission(); } catch (e) { console.error(e); }
     }
-
-    // If granted, get the push subscription from Apple and save to Supabase
     if (Notification.permission === 'granted') {
         try {
             const reg = await navigator.serviceWorker.ready;
             let subscription = await reg.pushManager.getSubscription();
-            
             if (!subscription) {
-                // Ensure this publicVapidKey matches the one updated during troubleshooting
                 const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw';
-                
                 subscription = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
                 });
-                
-                // Save the unique subscription object to your new Supabase database
-                const { error } = await supabaseClient.from('push_subscriptions').insert([{
-                    subscription: subscription.toJSON()
-                }]);
-                
-                if (error) {
-                    console.error("Error saving subscription to Supabase:", error);
-                } else {
-                    console.log("Push subscription saved successfully!");
-                }
+                await supabaseClient.from('push_subscriptions').insert([{ subscription: subscription.toJSON() }]);
             }
-        } catch (error) {
-            console.error("Error subscribing to push notifications:", error);
-        }
+        } catch (error) { console.error(error); }
     }
 }
 
 async function updateAppBadgeAndNotify(plants) {
     let overdueCount = 0;
     const now = Date.now();
-    
     plants.forEach(plant => {
         const { daysLeft } = plant.computedStatus || calculatePlantStatus(plant, now);
-        if (daysLeft <= 0) {
-            overdueCount++;
-        }
+        if (daysLeft <= 0) overdueCount++;
     });
 
-    // App Badge
     if ('setAppBadge' in navigator) {
-        try {
-            if (overdueCount > 0) await navigator.setAppBadge(overdueCount);
-            else await navigator.clearAppBadge();
-        } catch (e) {
-            console.error("Failed to update badge", e);
-        }
+        try { overdueCount > 0 ? await navigator.setAppBadge(overdueCount) : await navigator.clearAppBadge(); } catch (e) {}
     }
 
-    // Actual Notifications (Once per day limit to avoid spam)
     if ('Notification' in window && Notification.permission === 'granted' && overdueCount > 0) {
         const lastNotified = localStorage.getItem('lastNotifiedDate');
         const today = new Date().toDateString();
-        
         if (lastNotified !== today) {
             navigator.serviceWorker.ready.then(reg => {
                 reg.showNotification('Plants Need Water!', {
@@ -178,7 +150,6 @@ async function updateAppBadgeAndNotify(plants) {
 function showToast(message, undoCallback = null) {
     clearTimeout(toastTimeout);
     toastMessageEl.textContent = message;
-    
     if (undoCallback) {
         toastUndoBtn.style.display = 'block';
         activeUndoAction = undoCallback;
@@ -186,7 +157,6 @@ function showToast(message, undoCallback = null) {
         toastUndoBtn.style.display = 'none';
         activeUndoAction = null;
     }
-
     toastEl.classList.add('show');
     toastTimeout = setTimeout(() => {
         toastEl.classList.remove('show');
@@ -202,14 +172,12 @@ toastUndoBtn.addEventListener('click', () => {
     }
 });
 
-// JSON Export Feature
 exportBtn.addEventListener('click', async () => {
     try {
         const plants = await getAllPlants();
         const dataStr = JSON.stringify(plants, null, 2);
         const blob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        
         const a = document.createElement('a');
         a.href = url;
         a.download = `plant-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
@@ -217,14 +185,12 @@ exportBtn.addEventListener('click', async () => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
         showToast('Backup downloaded securely.');
     } catch (e) {
         showToast('Failed to export data.');
     }
 });
 
-// Image Compression using Canvas
 function compressImage(file, maxWidth = 800, quality = 0.7) {
     return new Promise((resolve, reject) => {
         if (!file) { resolve(null); return; }
@@ -235,14 +201,12 @@ function compressImage(file, maxWidth = 800, quality = 0.7) {
                 const canvas = document.createElement('canvas');
                 let width = img.width;
                 let height = img.height;
-                
                 if (width > maxWidth) {
                     height = Math.round((height * maxWidth) / width);
                     width = maxWidth;
                 }
                 canvas.width = width;
                 canvas.height = height;
-                
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 resolve(canvas.toDataURL('image/jpeg', quality)); 
@@ -270,8 +234,6 @@ function renderHistoryList(historyArray) {
         historyContainer.innerHTML = '<div class="history-item">No watering history yet.</div>';
         return;
     }
-    
-    // Sort newest first
     const sortedHistory = [...historyArray].sort((a, b) => b - a);
     sortedHistory.forEach((timestamp) => {
         const date = new Date(timestamp);
@@ -284,11 +246,11 @@ function renderHistoryList(historyArray) {
 }
 
 // Action Handlers
-async function handleWater(plantId) {
+async function handleWater(plantId, skipRender = false) {
     const plant = await getPlant(plantId);
     await ensurePermissions(); 
     const now = Date.now();
-    const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
+    const oldState = JSON.parse(JSON.stringify(plant)); 
 
     plant.lastWatered = now;
     if (!plant.history) plant.history = [];
@@ -296,7 +258,7 @@ async function handleWater(plantId) {
     plant.snoozedUntil = null; 
     
     await savePlant(plant);
-    renderPlants();
+    if (!skipRender) renderPlants();
     
     showToast(`${plant.name} watered!`, async () => {
         await savePlant(oldState);
@@ -307,7 +269,7 @@ async function handleWater(plantId) {
 
 async function handleSnooze(plantId) {
     const plant = await getPlant(plantId);
-    const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
+    const oldState = JSON.parse(JSON.stringify(plant)); 
     
     const lastWatered = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
     const currentTarget = Math.max(lastWatered + (plant.interval * MS_PER_DAY), plant.snoozedUntil || 0, Date.now());
@@ -329,36 +291,25 @@ async function renderPlants() {
     const now = Date.now();
     let plants = await getAllPlants();
     
-    // Calculate status for all plants first
     plants = plants.map(plant => ({ ...plant, computedStatus: calculatePlantStatus(plant, now) }));
-    
     updateAppBadgeAndNotify(plants);
 
     const searchTerm = searchInput.value.toLowerCase();
-    if (searchTerm) {
-        plants = plants.filter(p => p.name.toLowerCase().includes(searchTerm) || (p.species && p.species.toLowerCase().includes(searchTerm)));
-    }
+    if (searchTerm) plants = plants.filter(p => p.name.toLowerCase().includes(searchTerm) || (p.species && p.species.toLowerCase().includes(searchTerm)));
 
     const filterTerm = filterSelect.value;
     let dueCount = 0;
     
-    if (filterTerm === 'due') {
-        plants = plants.filter(p => p.computedStatus.daysLeft <= 0);
-    }
+    if (filterTerm === 'due') plants = plants.filter(p => p.computedStatus.daysLeft <= 0);
     
     const allPlants = await getAllPlants();
-    allPlants.forEach(p => {
-        if (calculatePlantStatus(p, now).daysLeft <= 0) dueCount++;
-    });
+    allPlants.forEach(p => { if (calculatePlantStatus(p, now).daysLeft <= 0) dueCount++; });
 
     waterAllBtn.style.display = dueCount > 0 && plants.length > 0 ? 'block' : 'none';
 
     const sortTerm = sortSelect.value;
-    if (sortTerm === 'urgency') {
-        plants.sort((a, b) => a.computedStatus.nextWaterDate - b.computedStatus.nextWaterDate);
-    } else if (sortTerm === 'name') {
-        plants.sort((a, b) => a.name.localeCompare(b.name));
-    }
+    if (sortTerm === 'urgency') plants.sort((a, b) => a.computedStatus.nextWaterDate - b.computedStatus.nextWaterDate);
+    else if (sortTerm === 'name') plants.sort((a, b) => a.name.localeCompare(b.name));
 
     if (plants.length === 0) {
         plantListEl.innerHTML = `
@@ -392,14 +343,8 @@ async function renderPlants() {
             progressPercent = Math.max(0, Math.min(100, (daysElapsed / totalIntervalDays) * 100));
         }
 
-        const lastWateredFormatted = new Date(lastWatered).toLocaleDateString(undefined, { 
-            month: 'short', 
-            day: 'numeric' 
-        });
-
-        const photoHtml = plant.photo 
-            ? `<img src="${plant.photo}" alt="${plant.name}">` 
-            : `🌱`;
+        const lastWateredFormatted = new Date(lastWatered).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const photoHtml = plant.photo ? `<img src="${plant.photo}" alt="${plant.name}">` : `🌱`;
 
         const card = document.createElement('div');
         card.className = 'plant-card';
@@ -411,12 +356,10 @@ async function renderPlants() {
                 <div class="bg-action bg-snooze">💤 Snooze</div>
             </div>
             <div class="card-foreground">
-                <div class="plant-header" style="margin-bottom: 0;">
-                    
+                <div class="plant-header">
                     <div class="plant-photo-ring" style="background: conic-gradient(${progressColor} ${progressPercent}%, var(--divider-color) 0);">
                         <div class="plant-photo-container">${photoHtml}</div>
                     </div>
-                    
                     <div class="plant-info">
                         <h3>${plant.name}</h3>
                         ${plant.species ? `<div class="plant-species">${plant.species}</div>` : ''}
@@ -424,12 +367,7 @@ async function renderPlants() {
                         <div class="status-row">
                             <p class="plant-status ${isOverdue ? 'overdue' : ''}" style="color: ${progressColor};">${statusText}</p>
                         </div>
-                        
                         <div class="last-watered-text">Last watered: ${lastWateredFormatted}</div>
-                        
-                        <div style="margin-top: 12px;">
-                            <button class="edit-btn" data-id="${plant.id}" style="padding: 0;">Edit / History</button>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -438,19 +376,15 @@ async function renderPlants() {
     });
 }
 
-// Search, Filter, Sort Listeners
 searchInput.addEventListener('input', renderPlants);
 filterSelect.addEventListener('change', renderPlants);
 sortSelect.addEventListener('change', renderPlants);
 
-// Bulk Action Listener
 waterAllBtn.addEventListener('click', async () => {
     await ensurePermissions();
     const now = Date.now();
     const plants = await getAllPlants();
     let wateredCount = 0;
-    
-    // Deep clone state for undo
     const oldPlantsState = JSON.parse(JSON.stringify(plants));
 
     for (let plant of plants) {
@@ -468,20 +402,10 @@ waterAllBtn.addEventListener('click', async () => {
     if (wateredCount > 0) {
         renderPlants();
         showToast(`Watered ${wateredCount} plant(s)!`, async () => {
-            for (let oldPlant of oldPlantsState) {
-                await savePlant(oldPlant);
-            }
+            for (let oldPlant of oldPlantsState) await savePlant(oldPlant);
             renderPlants();
             showToast('Bulk watering undone.');
         });
-    }
-});
-
-// PWA Shortcut handling on load
-window.addEventListener('load', () => {
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('action') === 'add') {
-        addModal.classList.add('show');
     }
 });
 
@@ -499,9 +423,7 @@ addForm.addEventListener('submit', async (e) => {
 
     const fileInput = document.getElementById('plant-photo');
     let photoDataUrl = null;
-    if (fileInput.files.length > 0) {
-        photoDataUrl = await compressImage(fileInput.files[0]);
-    }
+    if (fileInput.files.length > 0) photoDataUrl = await compressImage(fileInput.files[0]);
 
     const name = document.getElementById('plant-name').value;
     const species = document.getElementById('plant-species').value;
@@ -509,13 +431,7 @@ addForm.addEventListener('submit', async (e) => {
     const now = Date.now();
     
     await savePlant({
-        name,
-        species,
-        interval,
-        lastWatered: now,
-        history: [now],
-        snoozedUntil: null,
-        photo: photoDataUrl
+        name, species, interval, lastWatered: now, history: [now], snoozedUntil: null, photo: photoDataUrl
     });
 
     renderPlants();
@@ -524,53 +440,108 @@ addForm.addEventListener('submit', async (e) => {
     showToast(`${name} added!`);
 });
 
-// Edit Listener
-plantListEl.addEventListener('click', async (e) => {
-    if (e.target.classList.contains('edit-btn')) {
-        const id = Number(e.target.getAttribute('data-id'));
-        const plant = await getPlant(id);
-        if (!plant) return;
+// Profile View Logic
+async function openProfileModal(plantId) {
+    const plant = await getPlant(plantId);
+    if (!plant) return;
+    
+    currentProfilePlantId = plantId;
+    const { daysLeft } = calculatePlantStatus(plant, Date.now());
 
-        document.getElementById('edit-plant-id').value = plant.id;
-        document.getElementById('edit-plant-name').value = plant.name;
-        document.getElementById('edit-plant-species').value = plant.species || '';
-        document.getElementById('edit-water-interval').value = plant.interval;
-        
-        const preview = document.getElementById('edit-photo-preview');
-        if (plant.photo) {
-            preview.src = plant.photo;
-            preview.style.display = 'block';
-        } else {
-            preview.style.display = 'none';
-        }
-
-        renderHistoryList(plant.history || [plant.lastWatered]);
-        editModal.classList.add('show');
+    document.getElementById('profile-name').textContent = plant.name;
+    document.getElementById('profile-species').textContent = plant.species || '';
+    document.getElementById('profile-interval-text').textContent = plant.interval;
+    
+    const statusTextEl = document.getElementById('profile-status-text');
+    const statusIconEl = document.getElementById('profile-status-icon');
+    
+    if (daysLeft < 0) {
+        statusTextEl.textContent = `Overdue by ${Math.abs(daysLeft)} day(s)`;
+        statusTextEl.style.color = 'var(--danger-color)';
+        statusIconEl.textContent = '🚨';
+    } else if (daysLeft === 0) {
+        statusTextEl.textContent = 'Water today';
+        statusTextEl.style.color = 'var(--warning-color)';
+        statusIconEl.textContent = '💧';
+    } else {
+        statusTextEl.textContent = `Water in ${daysLeft} day(s)`;
+        statusTextEl.style.color = 'var(--text-primary)';
+        statusIconEl.textContent = '⏳';
     }
+
+    const headerImg = document.getElementById('profile-header-img');
+    const placeholder = document.getElementById('profile-placeholder-emoji');
+    if (plant.photo) {
+        headerImg.style.backgroundImage = `url(${plant.photo})`;
+        placeholder.style.display = 'none';
+    } else {
+        headerImg.style.backgroundImage = 'none';
+        placeholder.style.display = 'block';
+    }
+
+    renderHistoryList(plant.history || [plant.lastWatered]);
+    profileModal.classList.add('show');
+}
+
+closeProfileBtn.addEventListener('click', () => {
+    profileModal.classList.remove('show');
+    currentProfilePlantId = null;
 });
 
-// Swipe Gesture Logic
+profileWaterBtn.addEventListener('click', async () => {
+    if (!currentProfilePlantId) return;
+    await handleWater(currentProfilePlantId, true);
+    
+    // Refresh modal data instantly
+    openProfileModal(currentProfilePlantId); 
+    renderPlants();
+});
+
+// Open Edit Modal from Profile
+profileEditBtn.addEventListener('click', async () => {
+    if (!currentProfilePlantId) return;
+    const plant = await getPlant(currentProfilePlantId);
+    
+    document.getElementById('edit-plant-id').value = plant.id;
+    document.getElementById('edit-plant-name').value = plant.name;
+    document.getElementById('edit-plant-species').value = plant.species || '';
+    document.getElementById('edit-water-interval').value = plant.interval;
+    
+    const preview = document.getElementById('edit-photo-preview');
+    if (plant.photo) {
+        preview.src = plant.photo;
+        preview.style.display = 'block';
+    } else {
+        preview.style.display = 'none';
+    }
+
+    profileModal.classList.remove('show');
+    editModal.classList.add('show');
+});
+
+
+// Tap vs Swipe Gesture Logic
 let startX = 0;
 let currentX = 0;
 let swipingCard = null;
+let wasSwiped = false; // Flag to prevent tap if we swiped
 
 plantListEl.addEventListener('touchstart', e => {
-    // Ignore swipe if clicking the edit button directly
-    if (e.target.classList.contains('edit-btn')) return;
-    
     const card = e.target.closest('.card-foreground');
     if (!card) return;
     
+    wasSwiped = false;
     swipingCard = card;
     startX = e.touches[0].clientX;
-    card.style.transition = 'none'; // Remove transition for instant dragging
+    card.style.transition = 'none'; 
 }, { passive: true });
 
 plantListEl.addEventListener('touchmove', e => {
     if (!swipingCard) return;
     currentX = e.touches[0].clientX - startX;
     
-    // Add physical resistance feeling at the edges
+    if (Math.abs(currentX) > 10) wasSwiped = true;
+    
     if (currentX > 120) currentX = 120 + (currentX - 120) * 0.2;
     if (currentX < -120) currentX = -120 + (currentX + 120) * 0.2;
     
@@ -582,26 +553,34 @@ plantListEl.addEventListener('touchend', e => {
     
     const cardForeground = swipingCard;
     const plantId = Number(cardForeground.closest('.plant-card').getAttribute('data-id'));
-    const SWIPE_THRESHOLD = 75; // Pixels required to trigger the action
+    const SWIPE_THRESHOLD = 75;
     
-    // Re-enable smooth transition for the snap animation
     cardForeground.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
     
     if (currentX > SWIPE_THRESHOLD) {
-        // Swiped Right -> Water
         cardForeground.style.transform = `translateX(120%)`;
         setTimeout(() => handleWater(plantId), 250);
     } else if (currentX < -SWIPE_THRESHOLD) {
-        // Swiped Left -> Snooze
         cardForeground.style.transform = `translateX(-120%)`;
         setTimeout(() => handleSnooze(plantId), 250);
     } else {
-        // Did not cross threshold, snap back to center
         cardForeground.style.transform = `translateX(0)`;
     }
     
     swipingCard = null;
     currentX = 0;
+});
+
+// Click Listener for Tap-to-View Profile
+plantListEl.addEventListener('click', e => {
+    // If the user was dragging the card, prevent the tap event
+    if (wasSwiped) return; 
+    
+    const card = e.target.closest('.card-foreground');
+    if (!card) return;
+    
+    const plantId = Number(card.closest('.plant-card').getAttribute('data-id'));
+    openProfileModal(plantId);
 });
 
 // Edit & Delete Handlers
@@ -614,16 +593,14 @@ editForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = Number(document.getElementById('edit-plant-id').value);
     const plant = await getPlant(id);
-    const oldState = JSON.parse(JSON.stringify(plant)); // Clone for undo
+    const oldState = JSON.parse(JSON.stringify(plant)); 
     
     plant.name = document.getElementById('edit-plant-name').value;
     plant.species = document.getElementById('edit-plant-species').value;
     plant.interval = parseInt(document.getElementById('edit-water-interval').value, 10);
     
     const fileInput = document.getElementById('edit-plant-photo');
-    if (fileInput.files.length > 0) {
-        plant.photo = await compressImage(fileInput.files[0]);
-    }
+    if (fileInput.files.length > 0) plant.photo = await compressImage(fileInput.files[0]);
 
     await savePlant(plant);
     renderPlants();
@@ -646,7 +623,7 @@ deleteBtn.addEventListener('click', async () => {
         editModal.classList.remove('show');
         
         showToast(`${plant.name} deleted.`, async () => {
-            await savePlant(plant); // Re-insert the full plant object
+            await savePlant(plant); 
             renderPlants();
             showToast('Deletion undone.');
         });
