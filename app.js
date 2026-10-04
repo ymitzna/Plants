@@ -48,7 +48,6 @@ async function deletePlantFromDB(id) {
 const plantListEl = document.getElementById('plant-list');
 const addModal = document.getElementById('add-modal');
 const addBtn = document.getElementById('add-btn');
-const exportBtn = document.getElementById('export-btn');
 const cancelAddBtn = document.getElementById('cancel-add-btn');
 const addForm = document.getElementById('add-form');
 
@@ -142,24 +141,6 @@ toastUndoBtn.addEventListener('click', () => {
         activeUndoAction();
         toastEl.classList.remove('show');
         activeUndoAction = null;
-    }
-});
-
-exportBtn.addEventListener('click', () => {
-    try {
-        const dataStr = JSON.stringify(localPlants, null, 2);
-        const blob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `plant-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast('Backup downloaded securely.');
-    } catch (e) {
-        showToast('Failed to export data.');
     }
 });
 
@@ -516,7 +497,6 @@ let bgSnooze = null;
 let wasSwiped = false; 
 let isSwiping = false;
 
-// 60-FPS continuous render loop decoupled from touch events
 function swipeLoop() {
     if (!isSwiping || !swipingCard) return;
 
