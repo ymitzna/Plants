@@ -9,6 +9,7 @@
     --warning-color: #fbbf24;
     --danger-color: #ef4444; 
     --divider-color: #e2e8f0;
+    --edit-color: #3b82f6; 
 }
 
 * {
@@ -49,23 +50,32 @@ h1 {
     gap: 16px;
 }
 
-.icon-btn {
-    background: none;
+/* New Larger Add Button */
+.add-btn {
+    background-color: var(--accent-color);
+    color: white;
     border: none;
-    color: var(--accent-color);
-    font-size: 36px;
-    font-weight: 300;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    font-size: 32px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    transition: transform 0.2s ease, color 0.2s ease;
+    box-shadow: 0 4px 10px rgba(85, 201, 158, 0.4);
+    transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.icon-btn-small {
-    font-size: 24px;
+.add-btn:hover {
+    transform: scale(1.05);
+    background-color: var(--accent-color-hover);
+    box-shadow: 0 6px 14px rgba(85, 201, 158, 0.5);
 }
 
-.icon-btn:hover {
-    transform: scale(1.1);
-    color: var(--accent-color-hover);
+.add-btn:active {
+    transform: scale(0.95);
 }
 
 /* Controls Section */
@@ -139,11 +149,6 @@ h1 {
 }
 
 /* Animations */
-@keyframes slideUpFade {
-    0% { opacity: 0; transform: translateY(20px); }
-    100% { opacity: 1; transform: translateY(0); }
-}
-
 @keyframes popIn {
     0% { opacity: 0; transform: scale(0.9) translateY(20px); }
     100% { opacity: 1; transform: scale(1) translateY(0); }
@@ -164,7 +169,7 @@ h1 {
     border-radius: 16px;
     padding: 0; 
     box-shadow: none;
-    animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    /* Entry animation removed to prevent jarring reloads */
 }
 
 .card-background {
@@ -177,7 +182,7 @@ h1 {
     -webkit-mask-image: -webkit-radial-gradient(white, black);
     mask-image: radial-gradient(white, black);
     
-    /* Places the background on its own hardware layer to prevent rendering bleeds */
+    /* Places the background on its own hardware layer */
     transform: translateZ(0);
 }
 
@@ -309,6 +314,20 @@ h1 {
 .overdue {
     color: var(--danger-color) !important;
     font-weight: 700;
+}
+
+.edit-btn {
+    background: none;
+    border: none;
+    color: var(--edit-color);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.edit-btn:hover {
+    color: #2563eb;
 }
 
 /* Modals */
