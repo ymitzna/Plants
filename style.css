@@ -74,8 +74,55 @@ h1 {
     box-shadow: 0 6px 14px rgba(85, 201, 158, 0.5);
 }
 
+/* New Larger Add Button */
+.add-btn {
+    background-color: var(--accent-color);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    font-size: 32px;
+    
+    /* Fix for centering text icons */
+    line-height: 0;
+    padding-bottom: 4px; 
+    
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(85, 201, 158, 0.4);
+    transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.add-btn:hover {
+    transform: scale(1.05);
+    background-color: var(--accent-color-hover);
+    box-shadow: 0 6px 14px rgba(85, 201, 158, 0.5);
+}
+
 .add-btn:active {
     transform: scale(0.95);
+}
+
+/* Success Pulse Animations */
+@keyframes waterPulse {
+    0% { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); background-color: var(--card-bg); }
+    50% { box-shadow: 0 0 15px 4px rgba(85, 201, 158, 0.4); background-color: #e6f9f1; }
+    100% { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); background-color: var(--card-bg); }
+}
+.watered-pulse {
+    animation: waterPulse 0.4s ease-out;
+}
+
+@keyframes snoozePulse {
+    0% { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); background-color: var(--card-bg); }
+    50% { box-shadow: 0 0 15px 4px rgba(100, 116, 139, 0.2); background-color: #f1f5f9; }
+    100% { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); background-color: var(--card-bg); }
+}
+.snoozed-pulse {
+    animation: snoozePulse 0.4s ease-out;
 }
 
 /* Controls Section */
