@@ -172,6 +172,13 @@ h1 {
     top: 0; left: 0; right: 0; bottom: 0;
     border-radius: 16px;
     overflow: hidden;
+    
+    /* Safari border-radius clipping fix */
+    -webkit-mask-image: -webkit-radial-gradient(white, black);
+    mask-image: radial-gradient(white, black);
+    
+    /* Places the background on its own hardware layer to prevent rendering bleeds */
+    transform: translateZ(0);
 }
 
 .bg-action {
