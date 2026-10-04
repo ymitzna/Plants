@@ -108,7 +108,7 @@ async function ensurePermissions() {
             const reg = await navigator.serviceWorker.ready;
             let subscription = await reg.pushManager.getSubscription();
             if (!subscription) {
-                const publicVapidKey = 'BMLgtHvDuMMlRYahJNmrokmfy_clSvP5qgDZN_yz7tFRR5US2V82O63spXJlIVMqJ6BbT1za8-8ZV7yEtVebvGw';
+                const publicVapidKey = 'BOeEj0z9GYULAs84kxllq63lwRTCzK_3ebaRr14g_ElZb9RDCBrsGHlyOKketrTrt0RI79PyO5614gqEt4UhkaU';
                 subscription = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
