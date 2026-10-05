@@ -12,9 +12,13 @@ const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-// LOCAL STATE & CACHING (IndexedDB implementation for 5MB fix)
+// LOCAL STATE & CACHING
 let localPlants = [];
 const CACHE_KEY = 'plant_tracker_data';
+
+// Control States
+let currentFilter = 'all';
+let currentSort = 'urgency';
 
 const dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open('PlantTrackerDB', 1);
@@ -70,7 +74,6 @@ async function initDB() {
         }
     }
 
-    // Manifest Shortcut action verification
     if (new URLSearchParams(window.location.search).get('action') === 'add') {
         addModal.classList.add('show');
     }
@@ -130,8 +133,6 @@ const toastMessageEl = document.getElementById('toast-message');
 const toastUndoBtn = document.getElementById('toast-undo');
 
 const searchInput = document.getElementById('search-input');
-const filterSelect = document.getElementById('filter-select');
-const sortSelect = document.getElementById('sort-select');
 const waterAllBtn = document.getElementById('water-all-btn');
 
 let toastTimeout;
@@ -164,7 +165,6 @@ async function ensurePermissions() {
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
                 });
-                // UPSERT with conflict resolution prevents duplicate identical tokens in Supabase
                 await supabaseClient.from('push_subscriptions').upsert([{ subscription: subscription.toJSON() }], { onConflict: 'subscription' });
             }
         } catch (error) {}
@@ -249,7 +249,6 @@ function getMidnightTS(ts) {
 }
 
 function calculatePlantStatus(plant, now) {
-    // Normalize to midnight for drift-safe calendar arithmetic
     const todayTS = getMidnightTS(now);
     
     const lastWateredRaw = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
@@ -259,7 +258,6 @@ function calculatePlantStatus(plant, now) {
     const snoozedTS = plant.snoozedUntil ? getMidnightTS(plant.snoozedUntil) : 0;
     const nextWaterDate = Math.max(baseNextWaterDate, snoozedTS);
     
-    // Math.round counters fractional day inconsistencies when dividing by 24h across Daylight Saving Time transitions
     const daysLeft = Math.round((nextWaterDate - todayTS) / MS_PER_DAY);
     const totalIntervalDays = Math.round((nextWaterDate - lastWateredTS) / MS_PER_DAY);
 
@@ -303,6 +301,20 @@ function renderHistoryList(historyArray, containerEl, icon, label) {
         containerEl.appendChild(div);
     });
 }
+
+// Segmented Control Logic
+document.querySelectorAll('.segmented-control .segment').forEach(btn => {
+    btn.addEventListener('click', e => {
+        const parent = e.target.closest('.segmented-control');
+        parent.querySelectorAll('.segment').forEach(s => s.classList.remove('active'));
+        e.target.classList.add('active');
+        
+        if (parent.id === 'filter-control') currentFilter = e.target.getAttribute('data-val');
+        if (parent.id === 'sort-control') currentSort = e.target.getAttribute('data-val');
+        
+        renderPlants();
+    });
+});
 
 // Optimistic Action Handlers
 function handleWater(plantId, skipRender = false) {
@@ -396,19 +408,16 @@ function renderPlants() {
     const searchTerm = searchInput.value.toLowerCase();
     if (searchTerm) plants = plants.filter(p => p.name.toLowerCase().includes(searchTerm) || (p.species && p.species.toLowerCase().includes(searchTerm)));
 
-    const filterTerm = filterSelect.value;
     let dueCount = 0;
-    
-    if (filterTerm === 'due') {
+    if (currentFilter === 'due') {
         plants = plants.filter(p => p.computedStatus.daysLeft <= 0 || (p.computedStatus.fertilizerDaysLeft !== null && p.computedStatus.fertilizerDaysLeft <= 0));
     }
     
     localPlants.forEach(p => { if (calculatePlantStatus(p, now).daysLeft <= 0) dueCount++; });
     waterAllBtn.style.display = dueCount > 0 && plants.length > 0 ? 'block' : 'none';
 
-    const sortTerm = sortSelect.value;
-    if (sortTerm === 'urgency') plants.sort((a, b) => a.computedStatus.nextWaterDate - b.computedStatus.nextWaterDate);
-    else if (sortTerm === 'name') plants.sort((a, b) => a.name.localeCompare(b.name));
+    if (currentSort === 'urgency') plants.sort((a, b) => a.computedStatus.nextWaterDate - b.computedStatus.nextWaterDate);
+    else if (currentSort === 'name') plants.sort((a, b) => a.name.localeCompare(b.name));
 
     if (plants.length === 0) {
         plantListEl.innerHTML = `
@@ -497,8 +506,6 @@ function renderPlants() {
 }
 
 searchInput.addEventListener('input', renderPlants);
-filterSelect.addEventListener('change', renderPlants);
-sortSelect.addEventListener('change', renderPlants);
 
 waterAllBtn.addEventListener('click', () => {
     ensurePermissions();
@@ -572,7 +579,6 @@ addForm.addEventListener('submit', async (e) => {
         photo: photoDataUrl
     };
 
-    // Store optimistic response ID until backend assigns one
     const tempId = Date.now(); 
     let savedPlant = { ...plantPayload, id: tempId };
 
@@ -713,12 +719,80 @@ profileEditBtn.addEventListener('click', () => {
     editModal.classList.add('show');
 });
 
-// Photo Removal Click Handler
+// Photo Removal
 removePhotoBtn.addEventListener('click', () => {
     document.getElementById('edit-photo-preview').style.display = 'none';
     document.getElementById('edit-plant-photo').value = '';
     removePhotoBtn.style.display = 'none';
     pendingPhotoRemoval = true;
+});
+
+
+// PULL-TO-REFRESH
+const ptrIndicator = document.getElementById('ptr-indicator');
+const ptrIcon = ptrIndicator.querySelector('.ptr-icon');
+const ptrText = document.getElementById('ptr-text');
+let ptrStartY = 0, ptrCurrentY = 0, isPtrPulling = false;
+
+document.addEventListener('touchstart', e => {
+    if (window.scrollY <= 0) {
+        ptrStartY = e.touches[0].clientY;
+        isPtrPulling = true;
+    }
+}, { passive: true });
+
+document.addEventListener('touchmove', e => {
+    if (!isPtrPulling) return;
+    const currentY = e.touches[0].clientY;
+    
+    if (currentY > ptrStartY && window.scrollY <= 0) {
+        ptrCurrentY = (currentY - ptrStartY) * 0.4;
+        const maxPull = Math.min(ptrCurrentY, 65); // Cap the visual translation
+        
+        ptrIndicator.style.transform = `translateY(${maxPull}px)`;
+        plantListEl.style.transform = `translateY(${maxPull}px)`;
+        ptrIcon.style.transform = `rotate(${maxPull * 3}deg)`;
+        
+        if (maxPull > 50) {
+            ptrText.textContent = 'Release to refresh';
+        } else {
+            ptrText.textContent = 'Pull to refresh';
+        }
+    }
+}, { passive: true });
+
+document.addEventListener('touchend', async () => {
+    if (!isPtrPulling) return;
+    isPtrPulling = false;
+    
+    if (ptrCurrentY > 50) {
+        ptrText.textContent = 'Refreshing...';
+        ptrIcon.style.animation = 'spin 1s linear infinite';
+        
+        try {
+            if (supabaseClient) {
+                localPlants = await getAllPlants();
+                syncLocalCache();
+                renderPlants();
+            }
+        } catch (e) {
+            console.error('Refresh failed', e);
+        }
+        
+        ptrIcon.style.animation = 'none';
+        ptrText.textContent = 'Pull to refresh';
+    }
+    
+    ptrCurrentY = 0;
+    ptrIndicator.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+    plantListEl.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+    ptrIndicator.style.transform = `translateY(0)`;
+    plantListEl.style.transform = `translateY(0)`;
+    
+    setTimeout(() => {
+        ptrIndicator.style.transition = 'none';
+        plantListEl.style.transition = 'none';
+    }, 300);
 });
 
 
@@ -737,9 +811,13 @@ let isVerticalScroll = false;
 function swipeLoop() {
     if (!isSwiping || !swipingCard || isVerticalScroll) return;
 
-    if (rawX > 120) currentX = 120 + (rawX - 120) * 0.2;
-    else if (rawX < -120) currentX = -120 + (rawX + 120) * 0.2;
-    else currentX = rawX;
+    // Apply native-feeling progressive rubber-band resistance
+    const baseRawX = Math.abs(rawX);
+    const resistedX = Math.pow(baseRawX, 0.85); 
+    currentX = rawX > 0 ? resistedX : -resistedX;
+
+    // Apply subtle UI scale to increase the feeling of resistance
+    const scale = Math.max(0.92, 1 - (baseRawX / 1500));
 
     if (currentX > 0 && bgWater && bgSnooze) {
         bgWater.style.opacity = '1';
@@ -749,7 +827,7 @@ function swipeLoop() {
         bgSnooze.style.opacity = '1';
     }
 
-    swipingCard.style.transform = `translate3d(${currentX}px, 0, 0)`;
+    swipingCard.style.transform = `translate3d(${currentX}px, 0, 0) scale(${scale})`;
     requestAnimationFrame(swipeLoop);
 }
 
@@ -784,7 +862,7 @@ plantListEl.addEventListener('touchmove', e => {
         if (deltaY > deltaX && deltaY > 5) {
             isVerticalScroll = true;
             isSwiping = false;
-            swipingCard.style.transform = `translate3d(0, 0, 0)`;
+            swipingCard.style.transform = `translate3d(0, 0, 0) scale(1)`;
             swipingCard = null;
             return;
         } else if (deltaX > 5) {
@@ -809,10 +887,10 @@ plantListEl.addEventListener('touchend', e => {
     const plantId = Number(cardForeground.closest('.plant-card').getAttribute('data-id'));
     const SWIPE_THRESHOLD = 75;
     
-    cardForeground.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+    cardForeground.style.transition = 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
     
     if (currentX > SWIPE_THRESHOLD) {
-        cardForeground.style.transform = `translate3d(0, 0, 0)`;
+        cardForeground.style.transform = `translate3d(0, 0, 0) scale(1)`;
         cardForeground.classList.add('watered-pulse');
         
         setTimeout(() => {
@@ -823,7 +901,7 @@ plantListEl.addEventListener('touchend', e => {
         setTimeout(() => handleWater(plantId), 400); 
         
     } else if (currentX < -SWIPE_THRESHOLD) {
-        cardForeground.style.transform = `translate3d(0, 0, 0)`; 
+        cardForeground.style.transform = `translate3d(0, 0, 0) scale(1)`; 
         cardForeground.classList.add('snoozed-pulse'); 
         
         setTimeout(() => {
@@ -834,7 +912,7 @@ plantListEl.addEventListener('touchend', e => {
         setTimeout(() => handleSnooze(plantId), 400);
         
     } else {
-        cardForeground.style.transform = `translate3d(0, 0, 0)`;
+        cardForeground.style.transform = `translate3d(0, 0, 0) scale(1)`;
         setTimeout(() => {
             if (bgWater) bgWater.style.opacity = '0';
             if (bgSnooze) bgSnooze.style.opacity = '0';
