@@ -12,12 +12,34 @@ const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// LOCAL STATE
+// LOCAL STATE & CACHING
 let localPlants = [];
+const CACHE_KEY = 'plant_tracker_data';
+
+function syncLocalCache() {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(localPlants));
+}
 
 async function initDB() {
-    localPlants = await getAllPlants();
-    renderPlants();
+    // 1. Cache: Load instantly from local storage
+    const cachedData = localStorage.getItem(CACHE_KEY);
+    if (cachedData) {
+        try {
+            localPlants = JSON.parse(cachedData);
+            renderPlants();
+        } catch (e) {
+            console.error('Cache parsing error', e);
+        }
+    }
+
+    // 2. Network: Fetch fresh data in the background and silently update
+    try {
+        localPlants = await getAllPlants();
+        syncLocalCache();
+        renderPlants();
+    } catch (err) {
+        console.error('Failed to fetch fresh data from Supabase', err);
+    }
 }
 
 // DB Operations
@@ -214,10 +236,12 @@ function handleWater(plantId, skipRender = false) {
     plant.history.push(now);
     plant.snoozedUntil = null; 
     
+    syncLocalCache();
     if (!skipRender) renderPlants(); 
     
     showToast(`${plant.name} watered!`, () => {
         localPlants[plantIndex] = oldState;
+        syncLocalCache();
         renderPlants();
         savePlant(oldState); 
         showToast('Watering undone.');
@@ -237,10 +261,12 @@ function handleSnooze(plantId) {
     const currentTarget = Math.max(lastWatered + (plant.interval * MS_PER_DAY), plant.snoozedUntil || 0, Date.now());
     plant.snoozedUntil = currentTarget + MS_PER_DAY;
     
+    syncLocalCache();
     renderPlants(); 
     
     showToast(`${plant.name} snoozed for 1 day.`, () => {
         localPlants[plantIndex] = oldState;
+        syncLocalCache();
         renderPlants();
         savePlant(oldState);
         showToast('Snooze undone.');
@@ -360,9 +386,11 @@ waterAllBtn.addEventListener('click', () => {
     });
 
     if (wateredCount > 0) {
+        syncLocalCache();
         renderPlants();
         showToast(`Watered ${wateredCount} plant(s)!`, () => {
             localPlants = oldPlantsState;
+            syncLocalCache();
             renderPlants();
             localPlants.forEach(p => savePlant(p));
             showToast('Bulk watering undone.');
@@ -399,6 +427,7 @@ addForm.addEventListener('submit', async (e) => {
     });
 
     localPlants.push(savedPlant);
+    syncLocalCache();
     renderPlants();
     
     addModal.classList.remove('show');
@@ -549,25 +578,20 @@ plantListEl.addEventListener('touchend', e => {
     const plantId = Number(cardForeground.closest('.plant-card').getAttribute('data-id'));
     const SWIPE_THRESHOLD = 75;
     
-    // Re-enable smooth transition for the snap-back
     cardForeground.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
     
     if (currentX > SWIPE_THRESHOLD) {
-        // Swiped Right -> Water
-        cardForeground.style.transform = `translate3d(0, 0, 0)`; // Snap back to center
-        cardForeground.classList.add('watered-pulse'); // Play green glow
+        cardForeground.style.transform = `translate3d(0, 0, 0)`;
+        cardForeground.classList.add('watered-pulse');
         
-        // Fade the background action out smoothly as it snaps back
         setTimeout(() => {
             if (bgWater) bgWater.style.opacity = '0';
             if (bgSnooze) bgSnooze.style.opacity = '0';
         }, 150);
         
-        // Wait for the pulse animation to finish before rebuilding the DOM
         setTimeout(() => handleWater(plantId), 400); 
         
     } else if (currentX < -SWIPE_THRESHOLD) {
-        // Swiped Left -> Snooze
         cardForeground.style.transform = `translate3d(0, 0, 0)`; 
         cardForeground.classList.add('snoozed-pulse'); 
         
@@ -579,7 +603,6 @@ plantListEl.addEventListener('touchend', e => {
         setTimeout(() => handleSnooze(plantId), 400);
         
     } else {
-        // Did not cross threshold, just snap back without action
         cardForeground.style.transform = `translate3d(0, 0, 0)`;
         setTimeout(() => {
             if (bgWater) bgWater.style.opacity = '0';
@@ -621,11 +644,13 @@ editForm.addEventListener('submit', async (e) => {
     const fileInput = document.getElementById('edit-plant-photo');
     if (fileInput.files.length > 0) plant.photo = await compressImage(fileInput.files[0]);
 
+    syncLocalCache();
     renderPlants(); 
     editModal.classList.remove('show');
     
     showToast('Plant updated successfully.', () => {
         localPlants[plantIndex] = oldState;
+        syncLocalCache();
         renderPlants();
         savePlant(oldState);
         showToast('Edits undone.');
@@ -641,11 +666,13 @@ deleteBtn.addEventListener('click', () => {
     
     if(confirm(`Are you sure you want to delete ${plant.name}?`)) {
         localPlants.splice(plantIndex, 1);
+        syncLocalCache();
         renderPlants();
         editModal.classList.remove('show');
         
         showToast(`${plant.name} deleted.`, () => {
             localPlants.push(plant); 
+            syncLocalCache();
             renderPlants();
             savePlant(plant);
             showToast('Deletion undone.');
