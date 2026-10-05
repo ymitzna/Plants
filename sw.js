@@ -4,7 +4,8 @@ const ASSETS_TO_CACHE = [
     './index.html',
     './style.css',
     './app.js',
-    './manifest.json'
+    './manifest.json',
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
 ];
 
 self.addEventListener('install', event => {
@@ -38,7 +39,8 @@ self.addEventListener('fetch', event => {
     event.respondWith(
         caches.match(event.request).then(cachedResponse => {
             const fetchPromise = fetch(event.request).then(networkResponse => {
-                if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+                // Allow 'basic' and 'cors' types to ensure external CDNs like Supabase are cached
+                if (networkResponse && networkResponse.status === 200 && (networkResponse.type === 'basic' || networkResponse.type === 'cors')) {
                     caches.open(CACHE_NAME).then(cache => {
                         cache.put(event.request, networkResponse.clone());
                     });
@@ -59,9 +61,9 @@ self.addEventListener('push', event => {
     // Extract data from the server payload if available
     if (event.data) {
         try {
-            payload = event.data.json(); // If Supabase sends a JSON payload
+            payload = event.data.json(); 
         } catch (e) {
-            payload.body = event.data.text(); // Fallback to plain text
+            payload.body = event.data.text(); 
         }
     }
 
