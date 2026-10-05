@@ -10,44 +10,82 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 // Supabase Setup
 const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-// LOCAL STATE & CACHING
+// LOCAL STATE & CACHING (IndexedDB implementation for 5MB fix)
 let localPlants = [];
 const CACHE_KEY = 'plant_tracker_data';
 
+const dbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open('PlantTrackerDB', 1);
+    request.onupgradeneeded = event => {
+        event.target.result.createObjectStore('keyval');
+    };
+    request.onsuccess = event => resolve(event.target.result);
+    request.onerror = event => reject(event.target.error);
+});
+
+async function idbSet(key, val) {
+    const db = await dbPromise;
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('keyval', 'readwrite');
+        tx.objectStore('keyval').put(val, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function idbGet(key) {
+    const db = await dbPromise;
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('keyval', 'readonly');
+        const req = tx.objectStore('keyval').get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(tx.error);
+    });
+}
+
 function syncLocalCache() {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(localPlants));
+    idbSet(CACHE_KEY, localPlants).catch(e => console.error('IDB sync error', e));
 }
 
 async function initDB() {
-    const cachedData = localStorage.getItem(CACHE_KEY);
-    if (cachedData) {
-        try {
-            localPlants = JSON.parse(cachedData);
+    try {
+        const cachedData = await idbGet(CACHE_KEY);
+        if (cachedData) {
+            localPlants = cachedData;
             renderPlants();
-        } catch (e) {
-            console.error('Cache parsing error', e);
+        }
+    } catch (e) {
+        console.error('Cache parsing error', e);
+    }
+
+    if (supabaseClient) {
+        try {
+            localPlants = await getAllPlants();
+            syncLocalCache();
+            renderPlants();
+        } catch (err) {
+            console.error('Failed to fetch fresh data from Supabase', err);
         }
     }
 
-    try {
-        localPlants = await getAllPlants();
-        syncLocalCache();
-        renderPlants();
-    } catch (err) {
-        console.error('Failed to fetch fresh data from Supabase', err);
+    // Manifest Shortcut action verification
+    if (new URLSearchParams(window.location.search).get('action') === 'add') {
+        addModal.classList.add('show');
     }
 }
 
 // DB Operations
 async function getAllPlants() {
+    if (!supabaseClient) return [];
     const { data, error } = await supabaseClient.from('plants').select('*').order('id', { ascending: true });
     if (error) throw error;
     return data || [];
 }
 
 async function savePlant(plant) {
+    if (!supabaseClient) return plant;
     if (plant.id) {
         const { data, error } = await supabaseClient.from('plants').update(plant).eq('id', plant.id).select().single();
         if (error) throw error;
@@ -60,6 +98,7 @@ async function savePlant(plant) {
 }
 
 async function deletePlantFromDB(id) {
+    if (!supabaseClient) return;
     const { error } = await supabaseClient.from('plants').delete().eq('id', id);
     if (error) throw error;
 }
@@ -109,7 +148,7 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function ensurePermissions() {
-    if (!('Notification' in window)) return;
+    if (!('Notification' in window) || !supabaseClient) return;
     if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
         try { await Notification.requestPermission(); } catch (e) {}
     }
@@ -123,7 +162,7 @@ async function ensurePermissions() {
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
                 });
-                await supabaseClient.from('push_subscriptions').insert([{ subscription: subscription.toJSON() }]);
+                await supabaseClient.from('push_subscriptions').upsert([{ subscription: subscription.toJSON() }], { onConflict: 'subscription' });
             }
         } catch (error) {}
     }
@@ -201,14 +240,21 @@ function isSummer(dateObj = new Date()) {
 }
 
 function calculatePlantStatus(plant, now) {
-    const lastWatered = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
+    // Normalize to midnight to avoid time-of-day drift logic issues
+    const normalizedNow = new Date(now).setHours(0, 0, 0, 0);
+    
+    const lastWateredRaw = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
+    const lastWatered = new Date(lastWateredRaw).setHours(0, 0, 0, 0);
+    
     const baseNextWaterDate = lastWatered + (plant.interval * MS_PER_DAY);
-    const nextWaterDate = Math.max(baseNextWaterDate, plant.snoozedUntil || 0);
-    const daysLeft = Math.ceil((nextWaterDate - now) / MS_PER_DAY);
+    const snoozedNormalized = plant.snoozedUntil ? new Date(plant.snoozedUntil).setHours(0, 0, 0, 0) : 0;
+    const nextWaterDate = Math.max(baseNextWaterDate, snoozedNormalized);
+    const daysLeft = Math.ceil((nextWaterDate - normalizedNow) / MS_PER_DAY);
     const totalIntervalDays = Math.ceil((nextWaterDate - lastWatered) / MS_PER_DAY);
 
     // Fertilizer
-    const lastFertilized = plant.fertilizerHistory && plant.fertilizerHistory.length > 0 ? plant.fertilizerHistory[plant.fertilizerHistory.length - 1] : (plant.lastFertilized || now);
+    const lastFertilizedRaw = plant.fertilizerHistory && plant.fertilizerHistory.length > 0 ? plant.fertilizerHistory[plant.fertilizerHistory.length - 1] : (plant.lastFertilized || now);
+    const lastFertilized = new Date(lastFertilizedRaw).setHours(0, 0, 0, 0);
     const currentSeasonWeeks = isSummer(new Date(now)) ? plant.summerFertilizer : plant.winterFertilizer;
     
     let fertilizerDaysLeft = null;
@@ -216,7 +262,7 @@ function calculatePlantStatus(plant, now) {
     if (currentSeasonWeeks && currentSeasonWeeks > 0) {
         const intervalDays = currentSeasonWeeks * 7;
         nextFertilizeDate = lastFertilized + (intervalDays * MS_PER_DAY);
-        fertilizerDaysLeft = Math.ceil((nextFertilizeDate - now) / MS_PER_DAY);
+        fertilizerDaysLeft = Math.ceil((nextFertilizeDate - normalizedNow) / MS_PER_DAY);
     }
 
     return { lastWatered, nextWaterDate, daysLeft, totalIntervalDays, lastFertilized, fertilizerDaysLeft, nextFertilizeDate };
@@ -492,7 +538,8 @@ addForm.addEventListener('submit', async (e) => {
     const winterFertilizer = parseInt(document.getElementById('plant-winter-fert').value, 10) || 0;
     
     const now = Date.now();
-    const savedPlant = await savePlant({
+    
+    const plantPayload = {
         name, 
         species, 
         interval, 
@@ -504,7 +551,17 @@ addForm.addEventListener('submit', async (e) => {
         fertilizerHistory: (summerFertilizer > 0 || winterFertilizer > 0) ? [now] : [],
         snoozedUntil: null, 
         photo: photoDataUrl
-    });
+    };
+
+    // Store optimistic response ID until backend assigns one
+    const tempId = Date.now(); 
+    let savedPlant = { ...plantPayload, id: tempId };
+
+    try {
+        savedPlant = await savePlant(plantPayload);
+    } catch (err) {
+        console.error('Failed to sync to Supabase, saving locally only', err);
+    }
 
     localPlants.push(savedPlant);
     syncLocalCache();
@@ -637,6 +694,7 @@ profileEditBtn.addEventListener('click', () => {
 
 // SWIPE GESTURES
 let startX = 0;
+let startY = 0;
 let currentX = 0;
 let rawX = 0;
 let swipingCard = null;
@@ -644,9 +702,10 @@ let bgWater = null;
 let bgSnooze = null;
 let wasSwiped = false; 
 let isSwiping = false;
+let isVerticalScroll = false;
 
 function swipeLoop() {
-    if (!isSwiping || !swipingCard) return;
+    if (!isSwiping || !swipingCard || isVerticalScroll) return;
 
     if (rawX > 120) currentX = 120 + (rawX - 120) * 0.2;
     else if (rawX < -120) currentX = -120 + (rawX + 120) * 0.2;
@@ -670,12 +729,14 @@ plantListEl.addEventListener('touchstart', e => {
     
     wasSwiped = false;
     isSwiping = true;
+    isVerticalScroll = false;
     swipingCard = card;
     
     bgWater = swipingCard.parentElement.querySelector('.bg-water');
     bgSnooze = swipingCard.parentElement.querySelector('.bg-snooze');
     
     startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
     rawX = 0;
     currentX = 0;
     
@@ -685,12 +746,33 @@ plantListEl.addEventListener('touchstart', e => {
 
 plantListEl.addEventListener('touchmove', e => {
     if (!swipingCard) return;
+    
+    if (!wasSwiped && !isVerticalScroll) {
+        const deltaX = Math.abs(e.touches[0].clientX - startX);
+        const deltaY = Math.abs(e.touches[0].clientY - startY);
+        
+        if (deltaY > deltaX && deltaY > 5) {
+            isVerticalScroll = true;
+            isSwiping = false;
+            swipingCard.style.transform = `translate3d(0, 0, 0)`;
+            swipingCard = null;
+            return;
+        } else if (deltaX > 5) {
+            wasSwiped = true;
+        }
+    }
+    
+    if (isVerticalScroll) return;
+    
     rawX = e.touches[0].clientX - startX;
-    if (Math.abs(rawX) > 10) wasSwiped = true;
-}, { passive: true });
+    
+    if (wasSwiped && e.cancelable) {
+        e.preventDefault();
+    }
+}, { passive: false });
 
 plantListEl.addEventListener('touchend', e => {
-    if (!swipingCard) return;
+    if (!swipingCard || isVerticalScroll) return;
     
     isSwiping = false; 
     const cardForeground = swipingCard;
