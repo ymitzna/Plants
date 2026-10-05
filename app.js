@@ -21,7 +21,6 @@ function syncLocalCache() {
 }
 
 async function initDB() {
-    // 1. Cache: Load instantly from local storage
     const cachedData = localStorage.getItem(CACHE_KEY);
     if (cachedData) {
         try {
@@ -32,7 +31,6 @@ async function initDB() {
         }
     }
 
-    // 2. Network: Fetch fresh data in the background and silently update
     try {
         localPlants = await getAllPlants();
         syncLocalCache();
@@ -77,7 +75,10 @@ const profileModal = document.getElementById('profile-modal');
 const closeProfileBtn = document.getElementById('close-profile-btn');
 const profileEditBtn = document.getElementById('profile-edit-btn');
 const profileWaterBtn = document.getElementById('profile-water-btn');
+const profileFertBtn = document.getElementById('profile-fert-btn');
 const historyContainer = document.getElementById('profile-history-container');
+const fertHistoryContainer = document.getElementById('profile-fert-history-container');
+const fertHistoryGroup = document.getElementById('profile-fert-history-group');
 
 const editModal = document.getElementById('edit-modal');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
@@ -110,7 +111,7 @@ function urlBase64ToUint8Array(base64String) {
 async function ensurePermissions() {
     if (!('Notification' in window)) return;
     if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-        try { await Notification.requestPermission(); } catch (e) { console.error(e); }
+        try { await Notification.requestPermission(); } catch (e) {}
     }
     if (Notification.permission === 'granted') {
         try {
@@ -124,7 +125,7 @@ async function ensurePermissions() {
                 });
                 await supabaseClient.from('push_subscriptions').insert([{ subscription: subscription.toJSON() }]);
             }
-        } catch (error) { console.error(error); }
+        } catch (error) {}
     }
 }
 
@@ -194,19 +195,37 @@ function compressImage(file, maxWidth = 800, quality = 0.7) {
     });
 }
 
+function isSummer(dateObj = new Date()) {
+    const month = dateObj.getMonth();
+    return month >= 3 && month <= 8; // April (3) to Sept (8)
+}
+
 function calculatePlantStatus(plant, now) {
     const lastWatered = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
     const baseNextWaterDate = lastWatered + (plant.interval * MS_PER_DAY);
     const nextWaterDate = Math.max(baseNextWaterDate, plant.snoozedUntil || 0);
     const daysLeft = Math.ceil((nextWaterDate - now) / MS_PER_DAY);
     const totalIntervalDays = Math.ceil((nextWaterDate - lastWatered) / MS_PER_DAY);
-    return { lastWatered, nextWaterDate, daysLeft, totalIntervalDays };
+
+    // Fertilizer
+    const lastFertilized = plant.fertilizerHistory && plant.fertilizerHistory.length > 0 ? plant.fertilizerHistory[plant.fertilizerHistory.length - 1] : (plant.lastFertilized || now);
+    const currentSeasonWeeks = isSummer(new Date(now)) ? plant.summerFertilizer : plant.winterFertilizer;
+    
+    let fertilizerDaysLeft = null;
+    let nextFertilizeDate = null;
+    if (currentSeasonWeeks && currentSeasonWeeks > 0) {
+        const intervalDays = currentSeasonWeeks * 7;
+        nextFertilizeDate = lastFertilized + (intervalDays * MS_PER_DAY);
+        fertilizerDaysLeft = Math.ceil((nextFertilizeDate - now) / MS_PER_DAY);
+    }
+
+    return { lastWatered, nextWaterDate, daysLeft, totalIntervalDays, lastFertilized, fertilizerDaysLeft, nextFertilizeDate };
 }
 
-function renderHistoryList(historyArray) {
-    historyContainer.innerHTML = '';
+function renderHistoryList(historyArray, containerEl, icon, label) {
+    containerEl.innerHTML = '';
     if (!historyArray || historyArray.length === 0) {
-        historyContainer.innerHTML = '<div class="history-item">No watering history yet.</div>';
+        containerEl.innerHTML = `<div class="history-item">No ${label.toLowerCase()} history yet.</div>`;
         return;
     }
     const sortedHistory = [...historyArray].sort((a, b) => b - a);
@@ -215,8 +234,8 @@ function renderHistoryList(historyArray) {
         const formattedDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
         const div = document.createElement('div');
         div.className = 'history-item';
-        div.innerHTML = `<span>💧 Watered</span> <span>${formattedDate}</span>`;
-        historyContainer.appendChild(div);
+        div.innerHTML = `<span>${icon} ${label}</span> <span>${formattedDate}</span>`;
+        containerEl.appendChild(div);
     });
 }
 
@@ -272,7 +291,33 @@ function handleSnooze(plantId) {
         showToast('Snooze undone.');
     });
     
-    savePlant(plant).catch(e => console.error("Background sync failed", e));
+    savePlant(plant).catch(e => console.error(e));
+}
+
+function handleFertilize(plantId, skipRender = false) {
+    const plantIndex = localPlants.findIndex(p => p.id === plantId);
+    if (plantIndex === -1) return;
+    
+    const plant = localPlants[plantIndex];
+    const oldState = JSON.parse(JSON.stringify(plant)); 
+    
+    const now = Date.now();
+    plant.lastFertilized = now;
+    if (!plant.fertilizerHistory) plant.fertilizerHistory = [];
+    plant.fertilizerHistory.push(now);
+    
+    syncLocalCache();
+    if (!skipRender) renderPlants(); 
+    
+    showToast(`${plant.name} fed!`, () => {
+        localPlants[plantIndex] = oldState;
+        syncLocalCache();
+        renderPlants();
+        savePlant(oldState); 
+        showToast('Feeding undone.');
+    });
+    
+    savePlant(plant).catch(e => console.error(e)); 
 }
 
 // Synchronous Core Rendering
@@ -289,7 +334,9 @@ function renderPlants() {
     const filterTerm = filterSelect.value;
     let dueCount = 0;
     
-    if (filterTerm === 'due') plants = plants.filter(p => p.computedStatus.daysLeft <= 0);
+    if (filterTerm === 'due') {
+        plants = plants.filter(p => p.computedStatus.daysLeft <= 0 || (p.computedStatus.fertilizerDaysLeft !== null && p.computedStatus.fertilizerDaysLeft <= 0));
+    }
     
     localPlants.forEach(p => { if (calculatePlantStatus(p, now).daysLeft <= 0) dueCount++; });
     waterAllBtn.style.display = dueCount > 0 && plants.length > 0 ? 'block' : 'none';
@@ -309,7 +356,7 @@ function renderPlants() {
     }
 
     plants.forEach(plant => {
-        const { daysLeft, totalIntervalDays, lastWatered } = plant.computedStatus;
+        const { daysLeft, totalIntervalDays, lastWatered, fertilizerDaysLeft } = plant.computedStatus;
         
         let statusText = '';
         let isOverdue = false;
@@ -328,6 +375,26 @@ function renderPlants() {
             statusText = `Water in ${daysLeft} day(s)`;
             const daysElapsed = totalIntervalDays - daysLeft;
             progressPercent = Math.max(0, Math.min(100, (daysElapsed / totalIntervalDays) * 100));
+        }
+
+        let fertHtml = '';
+        if (fertilizerDaysLeft !== null) {
+            let fertStatusText = '';
+            let fertColor = 'var(--fert-color)';
+            if (fertilizerDaysLeft < 0) {
+                fertStatusText = `Feed overdue by ${Math.abs(fertilizerDaysLeft)} day(s)`;
+                fertColor = 'var(--danger-color)';
+            } else if (fertilizerDaysLeft === 0) {
+                fertStatusText = 'Feed today';
+                fertColor = 'var(--warning-color)';
+            } else {
+                fertStatusText = `Feed in ${fertilizerDaysLeft} day(s)`;
+            }
+            fertHtml = `
+                <div class="status-row">
+                    <p class="plant-status" style="color: ${fertColor}; font-size: 13px;">✨ ${fertStatusText}</p>
+                </div>
+            `;
         }
 
         const lastWateredFormatted = new Date(lastWatered).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -354,6 +421,7 @@ function renderPlants() {
                         <div class="status-row">
                             <p class="plant-status ${isOverdue ? 'overdue' : ''}" style="color: ${progressColor};">${statusText}</p>
                         </div>
+                        ${fertHtml}
                         <div class="last-watered-text">Last watered: ${lastWateredFormatted}</div>
                     </div>
                 </div>
@@ -420,10 +488,22 @@ addForm.addEventListener('submit', async (e) => {
     const name = document.getElementById('plant-name').value;
     const species = document.getElementById('plant-species').value;
     const interval = parseInt(document.getElementById('water-interval').value, 10);
-    const now = Date.now();
+    const summerFertilizer = parseInt(document.getElementById('plant-summer-fert').value, 10) || 0;
+    const winterFertilizer = parseInt(document.getElementById('plant-winter-fert').value, 10) || 0;
     
+    const now = Date.now();
     const savedPlant = await savePlant({
-        name, species, interval, lastWatered: now, history: [now], snoozedUntil: null, photo: photoDataUrl
+        name, 
+        species, 
+        interval, 
+        summerFertilizer,
+        winterFertilizer,
+        lastWatered: now, 
+        history: [now], 
+        lastFertilized: (summerFertilizer > 0 || winterFertilizer > 0) ? now : null,
+        fertilizerHistory: (summerFertilizer > 0 || winterFertilizer > 0) ? [now] : [],
+        snoozedUntil: null, 
+        photo: photoDataUrl
     });
 
     localPlants.push(savedPlant);
@@ -445,7 +525,7 @@ function openProfileModal(plantId) {
     if (!plant) return;
     
     currentProfilePlantId = plantId;
-    const { daysLeft } = calculatePlantStatus(plant, Date.now());
+    const { daysLeft, fertilizerDaysLeft } = calculatePlantStatus(plant, Date.now());
 
     document.getElementById('profile-name').textContent = plant.name;
     document.getElementById('profile-species').textContent = plant.species || '';
@@ -468,6 +548,32 @@ function openProfileModal(plantId) {
         statusIconEl.textContent = '⏳';
     }
 
+    const fertBox = document.getElementById('profile-fert-box');
+    const fertTextEl = document.getElementById('profile-fert-text');
+    if (fertilizerDaysLeft !== null) {
+        fertBox.style.display = 'inline-flex';
+        profileFertBtn.style.display = 'block';
+        fertHistoryGroup.style.display = 'block';
+        
+        document.getElementById('profile-summer-fert-text').textContent = plant.summerFertilizer || 0;
+        document.getElementById('profile-winter-fert-text').textContent = plant.winterFertilizer || 0;
+
+        if (fertilizerDaysLeft < 0) {
+            fertTextEl.textContent = `Feed overdue by ${Math.abs(fertilizerDaysLeft)} day(s)`;
+            fertTextEl.style.color = 'var(--danger-color)';
+        } else if (fertilizerDaysLeft === 0) {
+            fertTextEl.textContent = 'Feed today';
+            fertTextEl.style.color = 'var(--warning-color)';
+        } else {
+            fertTextEl.textContent = `Feed in ${fertilizerDaysLeft} day(s)`;
+            fertTextEl.style.color = 'var(--text-primary)';
+        }
+    } else {
+        fertBox.style.display = 'none';
+        profileFertBtn.style.display = 'none';
+        fertHistoryGroup.style.display = 'none';
+    }
+
     const headerImg = document.getElementById('profile-header-img');
     const placeholder = document.getElementById('profile-placeholder-emoji');
     if (plant.photo) {
@@ -478,7 +584,11 @@ function openProfileModal(plantId) {
         placeholder.style.display = 'block';
     }
 
-    renderHistoryList(plant.history || [plant.lastWatered]);
+    renderHistoryList(plant.history || [plant.lastWatered], historyContainer, '💧', 'Watered');
+    if (fertilizerDaysLeft !== null) {
+        renderHistoryList(plant.fertilizerHistory || [plant.lastFertilized], fertHistoryContainer, '✨', 'Fed');
+    }
+
     profileModal.classList.add('show');
 }
 
@@ -494,6 +604,13 @@ profileWaterBtn.addEventListener('click', () => {
     renderPlants();
 });
 
+profileFertBtn.addEventListener('click', () => {
+    if (!currentProfilePlantId) return;
+    handleFertilize(currentProfilePlantId, true);
+    openProfileModal(currentProfilePlantId); 
+    renderPlants();
+});
+
 profileEditBtn.addEventListener('click', () => {
     if (!currentProfilePlantId) return;
     const plant = localPlants.find(p => p.id === currentProfilePlantId);
@@ -502,6 +619,8 @@ profileEditBtn.addEventListener('click', () => {
     document.getElementById('edit-plant-name').value = plant.name;
     document.getElementById('edit-plant-species').value = plant.species || '';
     document.getElementById('edit-water-interval').value = plant.interval;
+    document.getElementById('edit-summer-fert').value = plant.summerFertilizer || '';
+    document.getElementById('edit-winter-fert').value = plant.winterFertilizer || '';
     
     const preview = document.getElementById('edit-photo-preview');
     if (plant.photo) {
@@ -516,7 +635,7 @@ profileEditBtn.addEventListener('click', () => {
 });
 
 
-// HARDWARE ACCELERATED SWIPE GESTURES
+// SWIPE GESTURES
 let startX = 0;
 let currentX = 0;
 let rawX = 0;
@@ -640,7 +759,14 @@ editForm.addEventListener('submit', async (e) => {
     plant.name = document.getElementById('edit-plant-name').value;
     plant.species = document.getElementById('edit-plant-species').value;
     plant.interval = parseInt(document.getElementById('edit-water-interval').value, 10);
+    plant.summerFertilizer = parseInt(document.getElementById('edit-summer-fert').value, 10) || 0;
+    plant.winterFertilizer = parseInt(document.getElementById('edit-winter-fert').value, 10) || 0;
     
+    if (!plant.lastFertilized && (plant.summerFertilizer > 0 || plant.winterFertilizer > 0)) {
+        plant.lastFertilized = Date.now();
+        plant.fertilizerHistory = [Date.now()];
+    }
+
     const fileInput = document.getElementById('edit-plant-photo');
     if (fileInput.files.length > 0) plant.photo = await compressImage(fileInput.files[0]);
 
