@@ -1,5 +1,5 @@
 :root {
-    /* Mint Green Light Theme*/
+    /* Mint Green Light Theme */
     --bg-color: #f0fdf4;
     --card-bg: #ffffff;
     --text-primary: #1e293b;
@@ -86,7 +86,7 @@ h1 {
     flex-direction: column;
     gap: 12px;
     position: sticky;
-    top: 0;
+    top: env(safe-area-inset-top);
     background-color: var(--bg-color);
     z-index: 9;
     border-bottom: 1px solid var(--divider-color);
