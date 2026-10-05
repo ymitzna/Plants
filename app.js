@@ -123,6 +123,7 @@ const editModal = document.getElementById('edit-modal');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const editForm = document.getElementById('edit-form');
 const deleteBtn = document.getElementById('delete-btn');
+const removePhotoBtn = document.getElementById('remove-photo-btn');
 
 const toastEl = document.getElementById('toast');
 const toastMessageEl = document.getElementById('toast-message');
@@ -136,6 +137,7 @@ const waterAllBtn = document.getElementById('water-all-btn');
 let toastTimeout;
 let activeUndoAction = null;
 let currentProfilePlantId = null;
+let pendingPhotoRemoval = false;
 
 // Utilities
 function urlBase64ToUint8Array(base64String) {
@@ -162,6 +164,7 @@ async function ensurePermissions() {
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
                 });
+                // UPSERT with conflict resolution prevents duplicate identical tokens in Supabase
                 await supabaseClient.from('push_subscriptions').upsert([{ subscription: subscription.toJSON() }], { onConflict: 'subscription' });
             }
         } catch (error) {}
@@ -239,33 +242,49 @@ function isSummer(dateObj = new Date()) {
     return month >= 3 && month <= 8; // April (3) to Sept (8)
 }
 
+function getMidnightTS(ts) {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+}
+
 function calculatePlantStatus(plant, now) {
-    // Normalize to midnight to avoid time-of-day drift logic issues
-    const normalizedNow = new Date(now).setHours(0, 0, 0, 0);
+    // Normalize to midnight for drift-safe calendar arithmetic
+    const todayTS = getMidnightTS(now);
     
     const lastWateredRaw = plant.history && plant.history.length > 0 ? plant.history[plant.history.length - 1] : plant.lastWatered;
-    const lastWatered = new Date(lastWateredRaw).setHours(0, 0, 0, 0);
+    const lastWateredTS = getMidnightTS(lastWateredRaw);
     
-    const baseNextWaterDate = lastWatered + (plant.interval * MS_PER_DAY);
-    const snoozedNormalized = plant.snoozedUntil ? new Date(plant.snoozedUntil).setHours(0, 0, 0, 0) : 0;
-    const nextWaterDate = Math.max(baseNextWaterDate, snoozedNormalized);
-    const daysLeft = Math.ceil((nextWaterDate - normalizedNow) / MS_PER_DAY);
-    const totalIntervalDays = Math.ceil((nextWaterDate - lastWatered) / MS_PER_DAY);
+    const baseNextWaterDate = lastWateredTS + (plant.interval * MS_PER_DAY);
+    const snoozedTS = plant.snoozedUntil ? getMidnightTS(plant.snoozedUntil) : 0;
+    const nextWaterDate = Math.max(baseNextWaterDate, snoozedTS);
+    
+    // Math.round counters fractional day inconsistencies when dividing by 24h across Daylight Saving Time transitions
+    const daysLeft = Math.round((nextWaterDate - todayTS) / MS_PER_DAY);
+    const totalIntervalDays = Math.round((nextWaterDate - lastWateredTS) / MS_PER_DAY);
 
     // Fertilizer
     const lastFertilizedRaw = plant.fertilizerHistory && plant.fertilizerHistory.length > 0 ? plant.fertilizerHistory[plant.fertilizerHistory.length - 1] : (plant.lastFertilized || now);
-    const lastFertilized = new Date(lastFertilizedRaw).setHours(0, 0, 0, 0);
+    const lastFertilizedTS = getMidnightTS(lastFertilizedRaw);
     const currentSeasonWeeks = isSummer(new Date(now)) ? plant.summerFertilizer : plant.winterFertilizer;
     
     let fertilizerDaysLeft = null;
     let nextFertilizeDate = null;
     if (currentSeasonWeeks && currentSeasonWeeks > 0) {
         const intervalDays = currentSeasonWeeks * 7;
-        nextFertilizeDate = lastFertilized + (intervalDays * MS_PER_DAY);
-        fertilizerDaysLeft = Math.ceil((nextFertilizeDate - normalizedNow) / MS_PER_DAY);
+        nextFertilizeDate = lastFertilizedTS + (intervalDays * MS_PER_DAY);
+        fertilizerDaysLeft = Math.round((nextFertilizeDate - todayTS) / MS_PER_DAY);
     }
 
-    return { lastWatered, nextWaterDate, daysLeft, totalIntervalDays, lastFertilized, fertilizerDaysLeft, nextFertilizeDate };
+    return { 
+        lastWatered: lastWateredRaw, 
+        nextWaterDate, 
+        daysLeft, 
+        totalIntervalDays, 
+        lastFertilized: lastFertilizedRaw, 
+        fertilizerDaysLeft, 
+        nextFertilizeDate 
+    };
 }
 
 function renderHistoryList(historyArray, containerEl, icon, label) {
@@ -679,16 +698,27 @@ profileEditBtn.addEventListener('click', () => {
     document.getElementById('edit-summer-fert').value = plant.summerFertilizer || '';
     document.getElementById('edit-winter-fert').value = plant.winterFertilizer || '';
     
+    pendingPhotoRemoval = false;
     const preview = document.getElementById('edit-photo-preview');
     if (plant.photo) {
         preview.src = plant.photo;
         preview.style.display = 'block';
+        removePhotoBtn.style.display = 'inline-block';
     } else {
         preview.style.display = 'none';
+        removePhotoBtn.style.display = 'none';
     }
 
     profileModal.classList.remove('show');
     editModal.classList.add('show');
+});
+
+// Photo Removal Click Handler
+removePhotoBtn.addEventListener('click', () => {
+    document.getElementById('edit-photo-preview').style.display = 'none';
+    document.getElementById('edit-plant-photo').value = '';
+    removePhotoBtn.style.display = 'none';
+    pendingPhotoRemoval = true;
 });
 
 
@@ -850,7 +880,11 @@ editForm.addEventListener('submit', async (e) => {
     }
 
     const fileInput = document.getElementById('edit-plant-photo');
-    if (fileInput.files.length > 0) plant.photo = await compressImage(fileInput.files[0]);
+    if (fileInput.files.length > 0) {
+        plant.photo = await compressImage(fileInput.files[0]);
+    } else if (pendingPhotoRemoval) {
+        plant.photo = null;
+    }
 
     syncLocalCache();
     renderPlants(); 
