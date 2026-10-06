@@ -110,6 +110,7 @@ async function deletePlantFromDB(id) {
 const plantListEl = document.getElementById('plant-list');
 const addModal = document.getElementById('add-modal');
 const addBtn = document.getElementById('add-btn');
+const notifyBtn = document.getElementById('notify-btn'); // FIX: Expose explicitly mapped notification button[cite: 1]
 const cancelAddBtn = document.getElementById('cancel-add-btn');
 const addForm = document.getElementById('add-form');
 
@@ -169,6 +170,18 @@ async function ensurePermissions() {
             }
         } catch (error) {}
     }
+}
+
+// FIX: Explicit click handler for iOS Notification Permissions[cite: 1]
+if (notifyBtn) {
+    notifyBtn.addEventListener('click', async () => {
+        await ensurePermissions();
+        if (Notification.permission === 'granted') {
+            showToast('Notifications enabled!');
+        } else {
+            showToast('Notification permission denied.');
+        }
+    });
 }
 
 function updateAppBadgeAndNotify(plants) {
@@ -318,7 +331,7 @@ document.querySelectorAll('.segmented-control .segment').forEach(btn => {
 
 // Optimistic Action Handlers
 function handleWater(plantId, skipRender = false) {
-    ensurePermissions(); 
+    // FIX: Removed ensurePermissions() to prevent iOS Safari throwing permission errors silently during programmatic calls[cite: 1]
     
     const plantIndex = localPlants.findIndex(p => p.id === plantId);
     if (plantIndex === -1) return;
@@ -508,7 +521,7 @@ function renderPlants() {
 searchInput.addEventListener('input', renderPlants);
 
 waterAllBtn.addEventListener('click', () => {
-    ensurePermissions();
+    // FIX: Removed ensurePermissions() to prevent iOS Safari throwing permission errors silently[cite: 1]
     const now = Date.now();
     let wateredCount = 0;
     const oldPlantsState = JSON.parse(JSON.stringify(localPlants));
@@ -547,7 +560,7 @@ cancelAddBtn.addEventListener('click', () => {
 
 addForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    ensurePermissions(); 
+    // FIX: Removed ensurePermissions()[cite: 1]
     
     const submitBtn = e.target.querySelector('button[type="submit"]');
     submitBtn.textContent = 'Saving...';
@@ -924,6 +937,21 @@ plantListEl.addEventListener('touchend', e => {
     bgSnooze = null;
 });
 
+// FIX: Added touchcancel to properly reset swiping states when iOS natively overrides touches (e.g. system gestures)[cite: 1]
+plantListEl.addEventListener('touchcancel', e => {
+    if (!swipingCard) return;
+    isSwiping = false;
+    swipingCard.style.transition = 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+    swipingCard.style.transform = `translate3d(0, 0, 0) scale(1)`;
+    setTimeout(() => {
+        if (bgWater) bgWater.style.opacity = '0';
+        if (bgSnooze) bgSnooze.style.opacity = '0';
+        swipingCard = null;
+        bgWater = null;
+        bgSnooze = null;
+    }, 300);
+});
+
 plantListEl.addEventListener('click', e => {
     if (wasSwiped) return; 
     const card = e.target.closest('.card-foreground');
@@ -994,7 +1022,14 @@ deleteBtn.addEventListener('click', () => {
             localPlants.push(plant); 
             syncLocalCache();
             renderPlants();
-            savePlant(plant);
+            
+            // FIX: Explicitly enforce an insert logic upon restoration since savePlant relies on id existence to run an .update() (which fails if the row is already deleted)[cite: 1]
+            if (supabaseClient) {
+                supabaseClient.from('plants').insert([plant]).then(({error}) => {
+                    if (error) console.error('Undo deletion failed to sync to database', error);
+                });
+            }
+            
             showToast('Deletion undone.');
         });
         
