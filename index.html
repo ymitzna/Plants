@@ -7,7 +7,7 @@
     
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="theme-color" content="#55c99e">
     
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -19,7 +19,6 @@
     <header>
         <h1>My Plants</h1>
         <div class="header-actions">
-            <!-- FIX: Added explicit notification toggle button to comply with iOS synchronous gesture rules[cite: 2] -->
             <button id="notify-btn" class="add-btn" style="font-size: 20px;" aria-label="Enable notifications">🔔</button>
             <button id="add-btn" class="add-btn" aria-label="Add new plant">+</button>
         </div>
@@ -59,6 +58,7 @@
     <!-- Plant Profile Modal (Bottom Sheet) -->
     <div id="profile-modal" class="modal">
         <div class="modal-content profile-content">
+            <div class="bottom-sheet-handle profile-handle" style="position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 20;"></div>
             <button id="close-profile-btn" class="close-modal-btn">✕</button>
             
             <div id="profile-header-img" class="profile-header-img">
@@ -78,6 +78,12 @@
                         <span id="profile-fert-icon">✨</span>
                         <span id="profile-fert-text">Fertilize status</span>
                     </div>
+                </div>
+
+                <!-- Growth Photo History Gallery -->
+                <div class="form-group" id="profile-gallery-group" style="margin-top: 24px; display: none;">
+                    <label>Growth History</label>
+                    <div id="profile-gallery-container" class="gallery-container"></div>
                 </div>
 
                 <div class="form-group" style="margin-top: 20px;">
@@ -106,7 +112,7 @@
             <h2>Add New Plant</h2>
             <form id="add-form">
                 <div class="form-group">
-                    <label for="plant-photo">Photo</label>
+                    <label for="plant-photo">First Photo</label>
                     <input type="file" id="plant-photo" accept="image/*">
                 </div>
                 <div class="form-group">
@@ -146,12 +152,14 @@
             <h2>Edit Plant</h2>
             <form id="edit-form">
                 <input type="hidden" id="edit-plant-id">
-                <div class="form-group photo-preview-group">
-                    <img id="edit-photo-preview" src="" alt="Current plant photo" style="display: none;">
-                    <button type="button" id="remove-photo-btn" class="btn-secondary" style="display: none; padding: 6px 16px; font-size: 13px; border-radius: 8px; margin-bottom: 12px; width: auto;">Remove Photo</button>
-                    <label for="edit-plant-photo">Update Photo</label>
+                
+                <div class="form-group photo-edit-group">
+                    <label>Manage Photos</label>
+                    <div id="edit-photo-gallery" class="edit-photo-gallery"></div>
+                    <label for="edit-plant-photo" style="margin-top: 8px;">Add Progress Photo</label>
                     <input type="file" id="edit-plant-photo" accept="image/*">
                 </div>
+
                 <div class="form-group">
                     <label for="edit-plant-name">Plant Nickname</label>
                     <input type="text" id="edit-plant-name" required>
@@ -175,8 +183,8 @@
                     </div>
                 </div>
                 
-                <div class="modal-actions" style="margin-top: 30px;">
-                    <button type="button" id="delete-btn" class="btn-danger">Delete Plant</button>
+                <div class="form-group" style="margin-top: 30px;">
+                    <button type="button" id="delete-btn" class="btn-danger" style="width: 100%; padding: 14px; border-radius: 12px; border: none; font-weight: bold; font-size: 16px; cursor: pointer;">Delete Plant</button>
                 </div>
                 <div class="modal-actions">
                     <button type="button" id="cancel-edit-btn" class="btn-secondary">Cancel</button>
