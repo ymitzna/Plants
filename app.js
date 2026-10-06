@@ -7,7 +7,7 @@ if ('serviceWorker' in navigator) {
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-// Supabase Setup
+// Supabase Setup 
 const SUPABASE_URL = 'https://pfxctthvgniihdcsjevi.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RV3n7SYVyE3LxAYdhpWJrQ_OKSsLwQX';
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
