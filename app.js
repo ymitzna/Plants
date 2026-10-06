@@ -100,6 +100,12 @@ async function savePlant(plant) {
     }
 }
 
+async function updatePlantFields(id, updates) {
+    if (!supabaseClient) return;
+    const { error } = await supabaseClient.from('plants').update(updates).eq('id', id);
+    if (error) console.error("Targeted sync failed", error);
+}
+
 async function deletePlantFromDB(id) {
     if (!supabaseClient) return;
     const { error } = await supabaseClient.from('plants').delete().eq('id', id);
@@ -110,7 +116,7 @@ async function deletePlantFromDB(id) {
 const plantListEl = document.getElementById('plant-list');
 const addModal = document.getElementById('add-modal');
 const addBtn = document.getElementById('add-btn');
-const notifyBtn = document.getElementById('notify-btn'); // FIX: Expose explicitly mapped notification button[cite: 1]
+const notifyBtn = document.getElementById('notify-btn'); 
 const cancelAddBtn = document.getElementById('cancel-add-btn');
 const addForm = document.getElementById('add-form');
 
@@ -127,7 +133,6 @@ const editModal = document.getElementById('edit-modal');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const editForm = document.getElementById('edit-form');
 const deleteBtn = document.getElementById('delete-btn');
-const removePhotoBtn = document.getElementById('remove-photo-btn');
 
 const toastEl = document.getElementById('toast');
 const toastMessageEl = document.getElementById('toast-message');
@@ -139,7 +144,7 @@ const waterAllBtn = document.getElementById('water-all-btn');
 let toastTimeout;
 let activeUndoAction = null;
 let currentProfilePlantId = null;
-let pendingPhotoRemoval = false;
+let pendingDeletedPhotos = []; // Tracks timestamps of photos deleted during edit
 
 // Utilities
 function urlBase64ToUint8Array(base64String) {
@@ -172,7 +177,6 @@ async function ensurePermissions() {
     }
 }
 
-// FIX: Explicit click handler for iOS Notification Permissions[cite: 1]
 if (notifyBtn) {
     notifyBtn.addEventListener('click', async () => {
         await ensurePermissions();
@@ -252,7 +256,7 @@ function compressImage(file, maxWidth = 800, quality = 0.7) {
 
 function isSummer(dateObj = new Date()) {
     const month = dateObj.getMonth();
-    return month >= 3 && month <= 8; // April (3) to Sept (8)
+    return month >= 3 && month <= 8; 
 }
 
 function getMidnightTS(ts) {
@@ -274,7 +278,6 @@ function calculatePlantStatus(plant, now) {
     const daysLeft = Math.round((nextWaterDate - todayTS) / MS_PER_DAY);
     const totalIntervalDays = Math.round((nextWaterDate - lastWateredTS) / MS_PER_DAY);
 
-    // Fertilizer
     const lastFertilizedRaw = plant.fertilizerHistory && plant.fertilizerHistory.length > 0 ? plant.fertilizerHistory[plant.fertilizerHistory.length - 1] : (plant.lastFertilized || now);
     const lastFertilizedTS = getMidnightTS(lastFertilizedRaw);
     const currentSeasonWeeks = isSummer(new Date(now)) ? plant.summerFertilizer : plant.winterFertilizer;
@@ -296,6 +299,21 @@ function calculatePlantStatus(plant, now) {
         fertilizerDaysLeft, 
         nextFertilizeDate 
     };
+}
+
+// Helpers for the Photo History Array
+function getPlantPhotos(plant) {
+    let photos = plant.photos ? [...plant.photos] : [];
+    // Migration: bring single legacy photo into timeline if needed
+    if (plant.photo && photos.length === 0) {
+        photos.push({ timestamp: plant.history?.[0] || Date.now(), url: plant.photo });
+    }
+    return photos.sort((a,b) => a.timestamp - b.timestamp);
+}
+
+function getLatestPhotoUrl(plant) {
+    const photos = getPlantPhotos(plant);
+    return photos.length > 0 ? photos[photos.length - 1].url : null;
 }
 
 function renderHistoryList(historyArray, containerEl, icon, label) {
@@ -331,8 +349,6 @@ document.querySelectorAll('.segmented-control .segment').forEach(btn => {
 
 // Optimistic Action Handlers
 function handleWater(plantId, skipRender = false) {
-    // FIX: Removed ensurePermissions() to prevent iOS Safari throwing permission errors silently during programmatic calls[cite: 1]
-    
     const plantIndex = localPlants.findIndex(p => p.id === plantId);
     if (plantIndex === -1) return;
     
@@ -352,11 +368,11 @@ function handleWater(plantId, skipRender = false) {
         localPlants[plantIndex] = oldState;
         syncLocalCache();
         renderPlants();
-        savePlant(oldState); 
+        updatePlantFields(oldState.id, { lastWatered: oldState.lastWatered, history: oldState.history, snoozedUntil: oldState.snoozedUntil });
         showToast('Watering undone.');
     });
     
-    savePlant(plant).catch(e => console.error("Background sync failed", e)); 
+    updatePlantFields(plant.id, { lastWatered: plant.lastWatered, history: plant.history, snoozedUntil: plant.snoozedUntil }); 
 }
 
 function handleSnooze(plantId) {
@@ -377,11 +393,11 @@ function handleSnooze(plantId) {
         localPlants[plantIndex] = oldState;
         syncLocalCache();
         renderPlants();
-        savePlant(oldState);
+        updatePlantFields(oldState.id, { snoozedUntil: oldState.snoozedUntil });
         showToast('Snooze undone.');
     });
     
-    savePlant(plant).catch(e => console.error(e));
+    updatePlantFields(plant.id, { snoozedUntil: plant.snoozedUntil });
 }
 
 function handleFertilize(plantId, skipRender = false) {
@@ -403,11 +419,11 @@ function handleFertilize(plantId, skipRender = false) {
         localPlants[plantIndex] = oldState;
         syncLocalCache();
         renderPlants();
-        savePlant(oldState); 
+        updatePlantFields(oldState.id, { lastFertilized: oldState.lastFertilized, fertilizerHistory: oldState.fertilizerHistory });
         showToast('Feeding undone.');
     });
     
-    savePlant(plant).catch(e => console.error(e)); 
+    updatePlantFields(plant.id, { lastFertilized: plant.lastFertilized, fertilizerHistory: plant.fertilizerHistory });
 }
 
 // Synchronous Core Rendering
@@ -485,7 +501,9 @@ function renderPlants() {
         }
 
         const lastWateredFormatted = new Date(lastWatered).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const photoHtml = plant.photo ? `<img src="${plant.photo}" alt="${plant.name}">` : `🌱`;
+        
+        const displayPhoto = getLatestPhotoUrl(plant);
+        const photoHtml = displayPhoto ? `<img src="${displayPhoto}" alt="${plant.name}">` : `🌱`;
 
         const card = document.createElement('div');
         card.className = 'plant-card';
@@ -521,7 +539,6 @@ function renderPlants() {
 searchInput.addEventListener('input', renderPlants);
 
 waterAllBtn.addEventListener('click', () => {
-    // FIX: Removed ensurePermissions() to prevent iOS Safari throwing permission errors silently[cite: 1]
     const now = Date.now();
     let wateredCount = 0;
     const oldPlantsState = JSON.parse(JSON.stringify(localPlants));
@@ -533,7 +550,7 @@ waterAllBtn.addEventListener('click', () => {
             if (!plant.history) plant.history = [];
             plant.history.push(now);
             plant.snoozedUntil = null;
-            savePlant(plant); 
+            updatePlantFields(plant.id, { lastWatered: plant.lastWatered, history: plant.history, snoozedUntil: null }); 
             wateredCount++;
         }
     });
@@ -545,7 +562,9 @@ waterAllBtn.addEventListener('click', () => {
             localPlants = oldPlantsState;
             syncLocalCache();
             renderPlants();
-            localPlants.forEach(p => savePlant(p));
+            localPlants.forEach(p => {
+                updatePlantFields(p.id, { lastWatered: p.lastWatered, history: p.history, snoozedUntil: p.snoozedUntil });
+            });
             showToast('Bulk watering undone.');
         });
     }
@@ -560,23 +579,25 @@ cancelAddBtn.addEventListener('click', () => {
 
 addForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    // FIX: Removed ensurePermissions()[cite: 1]
     
     const submitBtn = e.target.querySelector('button[type="submit"]');
     submitBtn.textContent = 'Saving...';
     submitBtn.disabled = true;
 
     const fileInput = document.getElementById('plant-photo');
-    let photoDataUrl = null;
-    if (fileInput.files.length > 0) photoDataUrl = await compressImage(fileInput.files[0]);
+    let photos = [];
+    const now = Date.now();
+
+    if (fileInput.files.length > 0) {
+        const photoDataUrl = await compressImage(fileInput.files[0]);
+        photos.push({ timestamp: now, url: photoDataUrl });
+    }
 
     const name = document.getElementById('plant-name').value;
     const species = document.getElementById('plant-species').value;
     const interval = parseInt(document.getElementById('water-interval').value, 10);
     const summerFertilizer = parseInt(document.getElementById('plant-summer-fert').value, 10) || 0;
     const winterFertilizer = parseInt(document.getElementById('plant-winter-fert').value, 10) || 0;
-    
-    const now = Date.now();
     
     const plantPayload = {
         name, 
@@ -589,7 +610,8 @@ addForm.addEventListener('submit', async (e) => {
         lastFertilized: (summerFertilizer > 0 || winterFertilizer > 0) ? now : null,
         fertilizerHistory: (summerFertilizer > 0 || winterFertilizer > 0) ? [now] : [],
         snoozedUntil: null, 
-        photo: photoDataUrl
+        photos,
+        photo: null // Obsolete
     };
 
     const tempId = Date.now(); 
@@ -671,12 +693,36 @@ function openProfileModal(plantId) {
 
     const headerImg = document.getElementById('profile-header-img');
     const placeholder = document.getElementById('profile-placeholder-emoji');
-    if (plant.photo) {
-        headerImg.style.backgroundImage = `url(${plant.photo})`;
+    
+    const photosTimeline = getPlantPhotos(plant);
+    if (photosTimeline.length > 0) {
+        headerImg.style.backgroundImage = `url(${photosTimeline[photosTimeline.length - 1].url})`;
         placeholder.style.display = 'none';
     } else {
         headerImg.style.backgroundImage = 'none';
         placeholder.style.display = 'block';
+    }
+
+    // Render Gallery
+    const galleryGroup = document.getElementById('profile-gallery-group');
+    const galleryContainer = document.getElementById('profile-gallery-container');
+    galleryContainer.innerHTML = '';
+
+    if (photosTimeline.length > 0) {
+        galleryGroup.style.display = 'block';
+        const descendingPhotos = [...photosTimeline].sort((a, b) => b.timestamp - a.timestamp);
+        descendingPhotos.forEach(p => {
+            const dateStr = new Date(p.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            const item = document.createElement('div');
+            item.className = 'gallery-item';
+            item.innerHTML = `
+                <img src="${p.url}" alt="Growth progress photo">
+                <span class="gallery-date">${dateStr}</span>
+            `;
+            galleryContainer.appendChild(item);
+        });
+    } else {
+        galleryGroup.style.display = 'none';
     }
 
     renderHistoryList(plant.history || [plant.lastWatered], historyContainer, '💧', 'Watered');
@@ -717,27 +763,31 @@ profileEditBtn.addEventListener('click', () => {
     document.getElementById('edit-summer-fert').value = plant.summerFertilizer || '';
     document.getElementById('edit-winter-fert').value = plant.winterFertilizer || '';
     
-    pendingPhotoRemoval = false;
-    const preview = document.getElementById('edit-photo-preview');
-    if (plant.photo) {
-        preview.src = plant.photo;
-        preview.style.display = 'block';
-        removePhotoBtn.style.display = 'inline-block';
-    } else {
-        preview.style.display = 'none';
-        removePhotoBtn.style.display = 'none';
-    }
+    pendingDeletedPhotos = [];
+    const editGallery = document.getElementById('edit-photo-gallery');
+    editGallery.innerHTML = '';
+    
+    const photosTimeline = getPlantPhotos(plant);
+    const descendingPhotos = [...photosTimeline].sort((a, b) => b.timestamp - a.timestamp);
+
+    descendingPhotos.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'edit-gallery-item';
+        item.innerHTML = `
+            <img src="${p.url}">
+            <button type="button" class="delete-photo-btn" data-ts="${p.timestamp}">✕</button>
+        `;
+        
+        item.querySelector('.delete-photo-btn').addEventListener('click', function() {
+            pendingDeletedPhotos.push(Number(this.getAttribute('data-ts')));
+            item.style.display = 'none'; 
+        });
+
+        editGallery.appendChild(item);
+    });
 
     profileModal.classList.remove('show');
     editModal.classList.add('show');
-});
-
-// Photo Removal
-removePhotoBtn.addEventListener('click', () => {
-    document.getElementById('edit-photo-preview').style.display = 'none';
-    document.getElementById('edit-plant-photo').value = '';
-    removePhotoBtn.style.display = 'none';
-    pendingPhotoRemoval = true;
 });
 
 
@@ -760,7 +810,7 @@ document.addEventListener('touchmove', e => {
     
     if (currentY > ptrStartY && window.scrollY <= 0) {
         ptrCurrentY = (currentY - ptrStartY) * 0.4;
-        const maxPull = Math.min(ptrCurrentY, 65); // Cap the visual translation
+        const maxPull = Math.min(ptrCurrentY, 65);
         
         ptrIndicator.style.transform = `translateY(${maxPull}px)`;
         plantListEl.style.transform = `translateY(${maxPull}px)`;
@@ -808,6 +858,44 @@ document.addEventListener('touchend', async () => {
     }, 300);
 });
 
+// Drag to Dismiss functionality added for Bottom Sheets
+let modalStartY = 0;
+let activeModal = null;
+
+document.querySelectorAll('.bottom-sheet-handle').forEach(handle => {
+    handle.addEventListener('touchstart', e => {
+        modalStartY = e.touches[0].clientY;
+        activeModal = e.target.closest('.modal-content');
+        if (activeModal) activeModal.style.transition = 'none';
+    }, { passive: true });
+    
+    handle.addEventListener('touchmove', e => {
+        if (!activeModal) return;
+        const deltaY = e.touches[0].clientY - modalStartY;
+        if (deltaY > 0) {
+            activeModal.style.transform = `translateY(${deltaY}px)`;
+        }
+    }, { passive: true });
+    
+    handle.addEventListener('touchend', e => {
+        if (!activeModal) return;
+        const deltaY = e.changedTouches[0].clientY - modalStartY;
+        activeModal.style.transition = 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+        
+        if (deltaY > 100) {
+            const modal = activeModal.closest('.modal');
+            modal.classList.remove('show');
+            setTimeout(() => {
+                activeModal.style.transform = '';
+                activeModal = null;
+            }, 400);
+        } else {
+            activeModal.style.transform = 'translateY(0)';
+            activeModal = null;
+        }
+    });
+});
+
 
 // SWIPE GESTURES
 let startX = 0;
@@ -824,12 +912,9 @@ let isVerticalScroll = false;
 function swipeLoop() {
     if (!isSwiping || !swipingCard || isVerticalScroll) return;
 
-    // Apply native-feeling progressive rubber-band resistance
     const baseRawX = Math.abs(rawX);
     const resistedX = Math.pow(baseRawX, 0.85); 
     currentX = rawX > 0 ? resistedX : -resistedX;
-
-    // Apply subtle UI scale to increase the feeling of resistance
     const scale = Math.max(0.92, 1 - (baseRawX / 1500));
 
     if (currentX > 0 && bgWater && bgSnooze) {
@@ -937,7 +1022,6 @@ plantListEl.addEventListener('touchend', e => {
     bgSnooze = null;
 });
 
-// FIX: Added touchcancel to properly reset swiping states when iOS natively overrides touches (e.g. system gestures)[cite: 1]
 plantListEl.addEventListener('touchcancel', e => {
     if (!swipingCard) return;
     isSwiping = false;
@@ -985,12 +1069,17 @@ editForm.addEventListener('submit', async (e) => {
         plant.fertilizerHistory = [Date.now()];
     }
 
+    // Process photo removals and additions
+    let updatedPhotos = getPlantPhotos(plant).filter(p => !pendingDeletedPhotos.includes(p.timestamp));
+    
     const fileInput = document.getElementById('edit-plant-photo');
     if (fileInput.files.length > 0) {
-        plant.photo = await compressImage(fileInput.files[0]);
-    } else if (pendingPhotoRemoval) {
-        plant.photo = null;
+        const newPhotoUrl = await compressImage(fileInput.files[0]);
+        updatedPhotos.push({ timestamp: Date.now(), url: newPhotoUrl });
     }
+
+    plant.photos = updatedPhotos;
+    plant.photo = null; // Clear out legacy string property to save database space
 
     syncLocalCache();
     renderPlants(); 
@@ -1023,7 +1112,6 @@ deleteBtn.addEventListener('click', () => {
             syncLocalCache();
             renderPlants();
             
-            // FIX: Explicitly enforce an insert logic upon restoration since savePlant relies on id existence to run an .update() (which fails if the row is already deleted)[cite: 1]
             if (supabaseClient) {
                 supabaseClient.from('plants').insert([plant]).then(({error}) => {
                     if (error) console.error('Undo deletion failed to sync to database', error);
